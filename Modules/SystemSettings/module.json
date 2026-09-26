@@ -1,0 +1,12 @@
+{
+    "name": "SystemSettings",
+    "alias": "systemsettings",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\SystemSettings\\App\\Providers\\SystemSettingsServiceProvider",
+        "Modules\\SystemSettings\\App\\Providers\\RouteServiceProvider"
+    ],
+    "files": []
+}

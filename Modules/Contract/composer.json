@@ -1,0 +1,31 @@
+{
+    "name": "nwidart/contract",
+    "description": "",
+    "authors": [
+        {
+            "name": "Nicolas Widart",
+            "email": "n.widart@gmail.com"
+        }
+    ],
+    "extra": {
+        "laravel": {
+            "providers": [],
+            "aliases": {
+
+            }
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "Modules\\Contract\\": "",
+            "Modules\\Contract\\App\\": "app/",
+            "Modules\\Contract\\Database\\Factories\\": "database/factories/",
+            "Modules\\Contract\\Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Modules\\Contract\\Tests\\": "tests/"
+        }
+    }
+}

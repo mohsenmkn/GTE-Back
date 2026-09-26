@@ -1,0 +1,11 @@
+{
+    "name": "Document",
+    "alias": "document",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\Document\\App\\Providers\\DocumentServiceProvider"
+    ],
+    "files": []
+}

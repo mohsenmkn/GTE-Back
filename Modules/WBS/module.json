@@ -1,0 +1,11 @@
+{
+    "name": "WBS",
+    "alias": "wbs",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\WBS\\App\\Providers\\WBSServiceProvider"
+    ],
+    "files": []
+}

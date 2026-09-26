@@ -1,0 +1,11 @@
+{
+    "name": "WarehouseGtrabar",
+    "alias": "warehousegtrabar",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\WarehouseGtrabar\\App\\Providers\\WarehouseGtrabarServiceProvider"
+    ],
+    "files": []
+}

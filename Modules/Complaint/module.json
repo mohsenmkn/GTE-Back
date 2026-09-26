@@ -1,0 +1,11 @@
+{
+    "name": "Complaint",
+    "alias": "complaint",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\Complaint\\App\\Providers\\ComplaintServiceProvider"
+    ],
+    "files": []
+}

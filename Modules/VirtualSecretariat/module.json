@@ -1,0 +1,11 @@
+{
+    "name": "VirtualSecretariat",
+    "alias": "virtualsecretariat",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\VirtualSecretariat\\App\\Providers\\VirtualSecretariatServiceProvider"
+    ],
+    "files": []
+}

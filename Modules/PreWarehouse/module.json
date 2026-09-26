@@ -1,0 +1,11 @@
+{
+    "name": "PreWarehouse",
+    "alias": "prewarehouse",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\PreWarehouse\\App\\Providers\\PreWarehouseServiceProvider"
+    ],
+    "files": []
+}

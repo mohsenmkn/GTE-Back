@@ -1,0 +1,12 @@
+{
+    "name": "HR",
+    "alias": "hr",
+    "description": "مدیریت منابع انسانی - سمت، شغل و چارت سازمانی",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\HR\\App\\Providers\\HRServiceProvider",
+        "Modules\\HR\\App\\Providers\\RouteServiceProvider"
+    ],
+    "files": []
+}
