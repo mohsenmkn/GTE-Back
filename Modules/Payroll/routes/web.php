@@ -1,7 +1,6 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use Modules\Payroll\App\Http\Controllers\PayrollController;
 
 /*
 |--------------------------------------------------------------------------
@@ -14,6 +13,7 @@ use Modules\Payroll\App\Http\Controllers\PayrollController;
 |
 */
 
-Route::group([], function () {
-    Route::resource('payroll', PayrollController::class)->names('payroll');
-});
+// Payroll is exposed through the API routes. The old resource route pointed
+// to a controller that no longer exists and made Laravel fail while compiling
+// the route list (and during application boot in some environments).
+Route::view('/payroll', 'Payroll::index')->name('payroll.index');

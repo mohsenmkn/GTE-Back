@@ -1,7 +1,6 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use Modules\Library\App\Http\Controllers\LibraryController;
 
 /*
 |--------------------------------------------------------------------------
@@ -14,6 +13,5 @@ use Modules\Library\App\Http\Controllers\LibraryController;
 |
 */
 
-Route::group([], function () {
-    Route::resource('library', LibraryController::class)->names('library');
-});
+// Library endpoints are registered in routes/api.php. The old web resource
+// route referenced a controller that does not exist in this module.

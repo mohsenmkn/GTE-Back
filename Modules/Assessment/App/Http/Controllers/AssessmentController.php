@@ -582,6 +582,7 @@ class AssessmentController extends Controller
     {
         $validated = $request->validate([
             'title' => 'required|string|max:255|unique:assessment_methods,title',
+            'description' => 'nullable|string|max:1000',  // ✅ اضافه شد
         ], [
             'title.required' => 'عنوان روش الزامی است.',
             'title.unique'   => 'این روش قبلاً ثبت شده است.',
@@ -599,6 +600,7 @@ class AssessmentController extends Controller
     {
         $validated = $request->validate([
             'title'     => 'sometimes|required|string|max:255|unique:assessment_methods,title,' . $method->id,
+            'description' => 'nullable|string|max:1000',  // ✅ اضافه شد
             'is_active' => 'nullable|boolean',
         ]);
 

@@ -1,7 +1,6 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use Modules\WBS\App\Http\Controllers\WBSController;
 
 /*
 |--------------------------------------------------------------------------
@@ -14,6 +13,5 @@ use Modules\WBS\App\Http\Controllers\WBSController;
 |
 */
 
-Route::group([], function () {
-    Route::resource('wbs', WBSController::class)->names('wbs');
-});
+// WBS is served by the API controllers. Keep this file intentionally empty;
+// the previous resource route referenced a removed WBSController.
