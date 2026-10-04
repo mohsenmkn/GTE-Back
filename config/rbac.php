@@ -88,6 +88,10 @@ return [
             'item_manage',       // ✅ جدید
             'warehouse_manage',  // ✅ جدید
             'warehouse_approve',      // ✅ جدید: تایید/رد انبار کلی
+            'warehouse_receipt',       // ✅ جدید: ورود رسید انبار
+            'custodian_approve',  // ✅ تغییر نام از custodian_final_approve
+            'commercial_voucher',      // ✅ جدید: ورود حواله بازرگانی
+            'warehouse_return_schedule',
         ],
 
 
@@ -195,6 +199,9 @@ return [
             'warehouse_manage' => 'مدیریت انبارها',
             'warehouse_approve' => 'تایید/رد انبار کلی',
             'view_all_warehouse' => 'مشاهده همه خریدها',
+            'commercial_voucher' => 'ورود حواله بازرگانی',
+            'warehouse_receipt' => 'ورود رسید انبار',
+            'warehouse_return_schedule' => 'تعیین تاریخ تحویل کالای مرجوعی به بازرگانی',
         ],
     ]
 

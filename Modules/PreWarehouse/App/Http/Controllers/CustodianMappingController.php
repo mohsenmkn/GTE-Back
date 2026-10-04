@@ -54,7 +54,31 @@ class CustodianMappingController extends Controller
             'user_id.required' => 'انتخاب کاربر الزامی است',
         ]);
 
-        // بررسی تکراری نبودن
+        // ✅ بررسی وجود رکورد Soft Deleted
+        $softDeletedMapping = CustodianMapping::withTrashed()
+            ->where('organizational_unit_id', $validated['organizational_unit_id'])
+            ->where('user_id', $validated['user_id'])
+            ->whereNotNull('deleted_at')
+            ->first();
+
+        if ($softDeletedMapping) {
+            // ✅ Restore کردن رکورد حذف‌شده
+            $softDeletedMapping->restore();
+
+            // به‌روزرسانی اطلاعات
+            $softDeletedMapping->update([
+                'role_title' => $validated['role_title'] ?? 'متولی کالا',
+                'description' => $validated['description'] ?? null,
+                'is_active' => $validated['is_active'] ?? true,
+            ]);
+
+            return response()->json([
+                'message' => 'متولی قبلی بازیابی و به‌روزرسانی شد',
+                'data' => $softDeletedMapping->fresh(['user', 'unit']),
+            ], 200);
+        }
+
+        // بررسی تکراری نبودن (برای رکوردهای فعال)
         $exists = CustodianMapping::where('organizational_unit_id', $validated['organizational_unit_id'])
             ->where('user_id', $validated['user_id'])
             ->exists();

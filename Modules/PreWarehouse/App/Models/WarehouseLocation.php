@@ -21,10 +21,12 @@ class WarehouseLocation extends Model
         'description',
         'section',
         'is_active',
+        'description', 'is_active', 'is_quarantine', // ✅ جدید
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
+        'is_quarantine' => 'boolean', // ✅ جدید
     ];
 
     // Relations
@@ -42,5 +44,10 @@ class WarehouseLocation extends Model
     public function scopeForWarehouse($query, int $warehouseId)
     {
         return $query->where('warehouse_id', $warehouseId);
+    }
+
+    public function scopeQuarantine($query)
+    {
+        return $query->where('is_quarantine', true);
     }
 }

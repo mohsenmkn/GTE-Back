@@ -4,87 +4,29 @@ namespace Modules\PreWarehouse\App\Repositories\Contracts;
 
 interface PurchaseRepositoryInterface
 {
-    /**
-     * دریافت لیست خریدها با فیلتر
-     */
-    /**
-     * دریافت لیست خریدها با فیلتر
-     */
     public function getAll(array $filters = [], ?int $userId = null);
-
-    /**
-     * دریافت یک خرید با تمام روابط
-     */
     public function findById(int $id);
-
-    /**
-     * ثبت خرید جدید
-     */
     public function create(array $data);
-
-    /**
-     * ویرایش خرید
-     */
     public function update(int $id, array $data);
 
-    // ═══════════════════════════════════════
-    // مرحله 2: تایید/رد توسط انبار کلی
-    // ═══════════════════════════════════════
-
-    /**
-     * تایید خرید توسط انبار کلی (warehouse_manager)
-     */
+    // مرحله 2: تایید/رد انبار کلی
     public function approveByWarehouse(int $purchaseId, int $userId, ?string $notes);
-
-    /**
-     * رد خرید توسط انبار کلی
-     */
     public function rejectByWarehouse(int $purchaseId, string $reason, int $userId);
 
-    // ═══════════════════════════════════════
-    // مرحله 3: تایید/رد توسط متولی
-    // ═══════════════════════════════════════
-
-    /**
-     * تایید خرید توسط متولی کالا
-     */
+    // ✅ مرحله 3: تایید/رد متولی (بعد از تایید انبار، قبل از تخصیص)
     public function approveByCustodian(int $purchaseId, int $userId, ?string $notes);
-
-    /**
-     * رد خرید توسط متولی کالا
-     */
     public function rejectByCustodian(int $purchaseId, string $reason, int $userId);
 
-    // ═══════════════════════════════════════
-    // مرحله 4: تخصیص به انبارها
-    // ═══════════════════════════════════════
-
-    /**
-     * تخصیص کالا به انبارها (تقسیم بین چند انبار)
-     */
+    // مرحله 4: تخصیص
     public function allocateWarehouses(int $purchaseId, array $allocations);
 
-    // ═══════════════════════════════════════
-    // مرحله 5: تعیین محل / رد توسط انبار مقصد
-    // ══════════════════════════════════════
-
-    /**
-     * رد تخصیص توسط انبار مقصد (برگشت به استخر تخصیص)
-     */
+    // مرحله 5: رد توسط انبار مقصد + تعیین محل
     public function rejectByDestination(int $allocationId, string $reason, ?int $userId);
-
-    /**
-     * تعیین محل نگهداری برای یک تخصیص
-     */
     public function assignLocation(int $allocationId, array $locationData);
 
-    // ═══════════════════════════════════════
-    // نهایی‌سازی
-    // ═══════════════════════════════════════
+    // ✅ مرحله 6: ورود شماره حواله توسط بازرگانی
+    public function enterVoucherNumber(int $purchaseId, int $userId, string $voucherNumber);
 
-    /**
-     * نهایی‌سازی خرید (آماده ثبت رسید انبار)
-     */
-    public function finalizePurchase(int $purchaseId, int $userId, string $voucherNumber);
-
+    // ✅ مرحله 7: ورود شماره رسید انبار
+    public function enterWarehouseReceipt(int $purchaseId, int $userId, string $receiptNumber);
 }

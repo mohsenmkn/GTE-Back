@@ -25,6 +25,7 @@ class WarehouseLocationController extends Controller
                 'section' => $l->section,
                 'description' => $l->description,
                 'is_active' => $l->is_active,
+                'is_quarantine' => $l->is_quarantine,
             ]),
         ]);
     }

@@ -154,4 +154,78 @@ Route::middleware(['auth:sanctum', 'user.can_login'])
         Route::delete('/custodians/{id}', [\Modules\PreWarehouse\App\Http\Controllers\CustodianMappingController::class, 'destroy'])
             ->middleware('permission:pre_warehouse.warehouse_manage')
             ->name('custodians.destroy');
+
+
+
+        // ═══════ Custodian Final Approval (تایید نهایی متولی) ═══════
+        Route::post('/purchases/{id}/final-approve-custodian', [PurchaseController::class, 'finalApproveByCustodian'])
+            ->middleware('permission:pre_warehouse.custodian_final_approve')
+            ->name('purchases.final_approve_custodian');
+
+        Route::post('/purchases/{id}/reject-custodian', [PurchaseController::class, 'rejectByCustodian'])
+            ->middleware('permission:pre_warehouse.custodian_final_approve')
+            ->name('purchases.reject_custodian');
+
+
+
+
+        // ═══════ Custodian Approval (تایید/رد متولی - بعد از تایید انبار) ═══════
+        Route::post('/purchases/{id}/approve-custodian', [PurchaseController::class, 'approveByCustodian'])
+            ->middleware('permission:pre_warehouse.custodian_approve')
+            ->name('purchases.approve_custodian');
+
+        Route::post('/purchases/{id}/reject-custodian', [PurchaseController::class, 'rejectByCustodian'])
+            ->middleware('permission:pre_warehouse.custodian_approve')
+            ->name('purchases.reject_custodian');
+
+// ═══════ Commercial Voucher (ورود حواله بازرگانی) ═══════
+        Route::post('/purchases/{id}/enter-voucher', [PurchaseController::class, 'enterVoucher'])
+            ->middleware('permission:pre_warehouse.commercial_voucher')
+            ->name('purchases.enter_voucher');
+
+// ═══════ Warehouse Receipt (ورود رسید انبار) ═══════
+        Route::post('/purchases/{id}/enter-receipt', [PurchaseController::class, 'enterWarehouseReceipt'])
+            ->middleware('permission:pre_warehouse.warehouse_receipt')
+            ->name('purchases.enter_receipt');
+
+
+        Route::get('/warehouses/{id}/quarantine', [WarehouseController::class, 'quarantine'])
+            ->middleware('permission:pre_warehouse.view')
+            ->name('warehouses.quarantine');
+
+
+
+
+
+// ═══════════════════════════════════════
+// Purchase Return - برگشت خرید رد شده
+// ═══════════════════════════════════════
+
+// انبار: تعیین تاریخ تحویل به بازرگانی
+        Route::post(
+            '/purchases/{id}/schedule-warehouse-return',
+            [PurchaseController::class, 'scheduleWarehouseReturn']
+        )
+            ->middleware('permission:pre_warehouse.warehouse_return_schedule')
+            ->name('purchases.schedule_warehouse_return');
+
+// بازرگانی: ثبت تحویل گرفتن کالا
+        Route::post(
+            '/purchases/{id}/confirm-commercial-received',
+            [PurchaseController::class, 'confirmCommercialReceived']
+        )
+            ->middleware('permission:pre_warehouse.commercial_voucher')
+            ->name('purchases.commercial_received');
+
+// بازرگانی: ثبت برگشت کالا به تأمین‌کننده
+        Route::post(
+            '/purchases/{id}/confirm-supplier-returned',
+            [PurchaseController::class, 'confirmSupplierReturned']
+        )
+            ->middleware('permission:pre_warehouse.commercial_voucher')
+            ->name('purchases.supplier_returned');
+
+
     });
+
+

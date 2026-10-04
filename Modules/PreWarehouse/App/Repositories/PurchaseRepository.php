@@ -5,8 +5,9 @@ namespace Modules\PreWarehouse\App\Repositories;
 use Illuminate\Support\Facades\DB;
 use Modules\PreWarehouse\App\Models\Allocation;
 use Modules\PreWarehouse\App\Models\Approval;
-use Modules\PreWarehouse\App\Models\Location as LocationModel;
+use Modules\PreWarehouse\App\Models\Location;
 use Modules\PreWarehouse\App\Models\Purchase;
+use Modules\PreWarehouse\App\Models\TemporaryExit;
 use Modules\PreWarehouse\App\Repositories\Contracts\PurchaseRepositoryInterface;
 
 class PurchaseRepository implements PurchaseRepositoryInterface
@@ -89,12 +90,22 @@ class PurchaseRepository implements PurchaseRepositoryInterface
             'commercialUser.employeePosition.unit',
             'item',
             'targetUnit',
+
             'allocations.warehouse',
-            'allocations.receivedBy',
-            'allocations.rejectedBy',
+            'allocations.warehouse.quarantineLocation',
+            'allocations.temporaryExits.registeredBy',
             'allocations.locations.warehouseLocation',
+
             'approvals.approver',
             'auditLogs.user',
+
+            'voucherEnteredBy',
+            'receiptEnteredBy',
+
+            // برگشت
+            'warehouseReturnScheduledBy',
+            'commercialReceivedBy',
+            'supplierReturnedBy',
         ])->findOrFail($id);
     }
 
@@ -108,36 +119,6 @@ class PurchaseRepository implements PurchaseRepositoryInterface
         $purchase = Purchase::findOrFail($id);
         $purchase->update($data);
         return $purchase->fresh();
-    }
-
-    /**
-     * تایید توسط انبار کلی
-     */
-    public function approveByWarehouse(int $purchaseId, int $userId, ?string $notes)
-    {
-        return DB::transaction(function () use ($purchaseId, $userId, $notes) {
-            $purchase = Purchase::findOrFail($purchaseId);
-
-            if (!$purchase->canBeApprovedByWarehouse()) {
-                throw new \Exception('این خرید در وضعیت تایید انبار نیست');
-            }
-
-            Approval::updateOrCreate(
-                ['purchase_id' => $purchaseId, 'approver_type' => 'warehouse_manager'],
-                [
-                    'approver_id' => $userId,
-                    'status' => 'approved',
-                    'approved_at' => now(),
-                    'approval_notes' => $notes,
-                ]
-            );
-
-            $purchase->update([
-                'status' => 'pending_custodian_approval',
-            ]);
-
-            return $purchase->fresh();
-        });
     }
 
     /**
@@ -172,71 +153,13 @@ class PurchaseRepository implements PurchaseRepositoryInterface
         });
     }
 
-    /**
-     * تایید توسط متولی
-     */
-    public function approveByCustodian(int $purchaseId, int $userId, ?string $notes)
-    {
-        return DB::transaction(function () use ($purchaseId, $userId, $notes) {
-            $purchase = Purchase::findOrFail($purchaseId);
 
-            if (!$purchase->canBeApprovedByCustodian()) {
-                throw new \Exception('این خرید در وضعیت تایید متولی نیست');
-            }
-
-            Approval::updateOrCreate(
-                ['purchase_id' => $purchaseId, 'approver_type' => 'custodian'],
-                [
-                    'approver_id' => $userId,
-                    'status' => 'approved',
-                    'approved_at' => now(),
-                    'approval_notes' => $notes,
-                ]
-            );
-
-            $purchase->update([
-                'status' => 'pending_allocation',
-                'available_for_allocation' => $purchase->quantity,
-            ]);
-
-            return $purchase->fresh();
-        });
-    }
-
-    /**
-     * رد توسط متولی
-     */
-    public function rejectByCustodian(int $purchaseId, string $reason, int $userId)
-    {
-        return DB::transaction(function () use ($purchaseId, $reason, $userId) {
-            $purchase = Purchase::findOrFail($purchaseId);
-
-            if (!$purchase->canBeApprovedByCustodian()) {
-                throw new \Exception('این خرید در وضعیت تایید متولی نیست');
-            }
-
-            Approval::updateOrCreate(
-                ['purchase_id' => $purchaseId, 'approver_type' => 'custodian'],
-                [
-                    'approver_id' => $userId,
-                    'status' => 'rejected',
-                    'rejection_reason' => $reason,
-                    'rejected_at' => now(),
-                ]
-            );
-
-            $purchase->update([
-                'status' => 'rejected_by_custodian',
-                'rejected_at' => now(),
-                'rejection_reason' => $reason,
-            ]);
-
-            return $purchase->fresh();
-        });
-    }
 
     /**
      * تخصیص به انبارها
+     */
+    /**
+     * تخصیص کالا به انبارها (با انتقال خودکار به قرنطینه)
      */
     public function allocateWarehouses(int $purchaseId, array $allocations)
     {
@@ -259,12 +182,32 @@ class PurchaseRepository implements PurchaseRepositoryInterface
                 throw new \Exception('مجموع تخصیص‌ها نمی‌تواند بیشتر از مقدار کل باشد');
             }
 
+
             foreach ($allocations as $allocation) {
-                Allocation::create([
-                    'purchase_id' => $purchaseId,
-                    'warehouse_id' => $allocation['warehouse_id'],
+                $warehouse = \Modules\PreWarehouse\App\Models\Warehouse::findOrFail(
+                    $allocation['warehouse_id']
+                );
+
+                // اطمینان از وجود محل قرنطینه
+                $quarantine = $warehouse->ensureQuarantine();
+
+                // ابتدا ایجاد تخصیص و دریافت شناسه آن
+                $createdAllocation = Allocation::create([
+                    'purchase_id'   => $purchaseId,
+                    'warehouse_id'  => $warehouse->id,
                     'allocated_qty' => $allocation['allocated_qty'],
-                    'status' => 'pending',
+                    'status'        => 'in_quarantine',
+                ]);
+
+                // ثبت محل قرنطینه با اتصال به تخصیص واقعی
+                Location::create([
+                    'allocation_id'        => $createdAllocation->id,
+                    'warehouse_id'         => $warehouse->id,
+                    'warehouse_location_id'=> $quarantine->id,
+                    'location_name'        => "قرنطینه - {$warehouse->name}",
+                    'section_code'         => 'QUARANTINE',
+                    'assigned_qty'         => $allocation['allocated_qty'],
+                    'description'          => "کالا به صورت خودکار به قرنطینه انبار {$warehouse->name} منتقل شد",
                 ]);
             }
 
@@ -272,7 +215,7 @@ class PurchaseRepository implements PurchaseRepositoryInterface
                 'total_allocated_qty' => $newTotalAllocated,
                 'available_for_allocation' => $purchase->quantity - $newTotalAllocated,
                 'status' => $newTotalAllocated >= $purchase->quantity
-                    ? 'pending_location_assignment'
+                    ? 'pending_custodian_approval'  // ✅ بعد از تخصیص → تایید متولی
                     : 'allocated',
                 'allocated_at' => now(),
             ]);
@@ -324,23 +267,80 @@ class PurchaseRepository implements PurchaseRepositoryInterface
     /**
      * تعیین محل نگهداری
      */
+    /**
+     * تعیین محل نگهداری برای یک تخصیص
+     */
+    /**
+     * تعیین محل نگهداری برای یک تخصیص
+     */
     public function assignLocation(int $allocationId, array $locationData)
     {
         return DB::transaction(function () use ($allocationId, $locationData) {
             $allocation = Allocation::with('purchase')->findOrFail($allocationId);
 
-            if ($allocation->status !== 'pending') {
-                throw new \Exception('این تخصیص در وضعیت مناسب برای تعیین محل نیست');
+            // تخصیص نهایی بعد از رسید حواله و رسید انبار: مقصد و محل نگهداری تعیین می‌شود.
+            if ($allocation->purchase->status === 'pending_final_allocation') {
+                $warehouse = \Modules\PreWarehouse\App\Models\Warehouse::findOrFail($locationData['warehouse_id']);
+                $warehouseLocation = \Modules\PreWarehouse\App\Models\WarehouseLocation::where('warehouse_id', $warehouse->id)
+                    ->where('id', $locationData['warehouse_location_id'] ?? 0)
+                    ->where('is_active', true)
+                    ->first();
+                if (!$warehouseLocation) {
+                    throw new \Exception('محل انتخاب‌شده متعلق به انبار مقصد نیست یا غیرفعال است');
+                }
+                $remainingQty = (int) $allocation->allocated_qty - (int) ($allocation->temporary_exit_qty ?? 0);
+                if ((int) ($locationData['assigned_qty'] ?? 0) !== $remainingQty) {
+                    throw new \Exception("مقدار ثبت‌شده باید برابر با باقیمانده کالا ({$remainingQty}) باشد");
+                }
+                $allocation->update([
+                    'warehouse_id' => $warehouse->id,
+                    'status' => 'location_assigned',
+                ]);
+                $allocation->locations()->delete();
+                if ($remainingQty > 0) {
+                    Location::create([
+                        'allocation_id' => $allocationId,
+                        'warehouse_id' => $warehouse->id,
+                        'warehouse_location_id' => $warehouseLocation->id,
+                        'location_name' => $warehouseLocation->name,
+                        'section_code' => $warehouseLocation->code,
+                        'assigned_qty' => $remainingQty,
+                        'description' => $locationData['description'] ?? null,
+                    ]);
+                }
+                $purchase = $allocation->purchase()->first();
+                $unfinished = $purchase->allocations()
+                    ->whereRaw('allocated_qty > COALESCE(temporary_exit_qty, 0)')
+                    ->where('status', '!=', 'location_assigned')
+                    ->exists();
+                if (!$unfinished) {
+                    $purchase->update([
+                        'status' => 'fully_received',
+                        'fully_received_at' => now(),
+                        'location_assigned_at' => now(),
+                    ]);
+                }
+                return $allocation->fresh(['locations.warehouseLocation', 'warehouse', 'purchase']);
             }
 
-            LocationModel::create([
+            if ($allocation->status !== 'pending') {
+                throw new \Exception('این تخصیص در وضعیت تعیین محل نیست');
+            }
+
+            // ایجاد رکورد محل
+            Location::create([
                 'allocation_id' => $allocationId,
                 'warehouse_id' => $allocation->warehouse_id,
                 'warehouse_location_id' => $locationData['warehouse_location_id'] ?? null,
-                'location_name' => $locationData['location_name'],
-                'description' => $locationData['description'] ?? null,
+                'location_name' => $locationData['location_name'] ?? null,
                 'section_code' => $locationData['section_code'] ?? null,
-                'assigned_qty' => $locationData['assigned_qty'],
+                'assigned_qty' => $locationData['assigned_qty'] ?? $allocation->allocated_qty,
+                'description' => $locationData['description'] ?? null,
+            ]);
+
+            // ✅ به‌روزرسانی وضعیت allocation به location_assigned
+            $allocation->update([
+                'status' => 'location_assigned',
             ]);
 
             // بررسی تکمیل محل‌ها
@@ -351,13 +351,14 @@ class PurchaseRepository implements PurchaseRepositoryInterface
                     ->count() === 0;
 
             if ($allAllocationsHaveLocation) {
+                // ✅ تغییر وضعیت purchase به pending_commercial_voucher (نه location_assigned)
                 $purchase->update([
-                    'status' => 'location_assigned',
+                    'status' => 'pending_commercial_voucher',
                     'location_assigned_at' => now(),
                 ]);
             }
 
-            return $allocation->fresh();
+            return $allocation->fresh(['location', 'warehouse']);
         });
     }
 
@@ -395,4 +396,361 @@ class PurchaseRepository implements PurchaseRepositoryInterface
             return $purchase->fresh();
         });
     }
+
+
+    /**
+     * ✅ تایید نهایی متولی (بعد از تخصیص - رویت کالا)
+     */
+    public function finalApproveByCustodian(int $purchaseId, int $userId, ?string $notes)
+    {
+        return DB::transaction(function () use ($purchaseId, $userId, $notes) {
+            $purchase = Purchase::findOrFail($purchaseId);
+
+            if (!$purchase->canBeFinalApprovedByCustodian()) {
+                throw new \Exception('این خرید در وضعیت تایید نهایی متولی نیست');
+            }
+
+            Approval::updateOrCreate(
+                ['purchase_id' => $purchaseId, 'approver_type' => 'custodian'],
+                [
+                    'approver_id' => $userId,
+                    'status' => 'approved',
+                    'approved_at' => now(),
+                    'approval_notes' => $notes,
+                ]
+            );
+
+            $purchase->update([
+                'status' => 'pending_commercial_voucher',
+                'custodian_approved_at' => now(),
+            ]);
+
+            return $purchase->fresh();
+        });
+    }
+
+    /**
+     * تایید توسط انبار کلی → مستقیماً می‌رود به pending_allocation
+     */
+    public function approveByWarehouse(int $purchaseId, int $userId, ?string $notes)
+    {
+        return DB::transaction(function () use ($purchaseId, $userId, $notes) {
+            $purchase = Purchase::findOrFail($purchaseId);
+
+            if (!$purchase->canBeApprovedByWarehouse()) {
+                throw new \Exception('این خرید در وضعیت تایید انبار نیست');
+            }
+
+            Approval::updateOrCreate(
+                ['purchase_id' => $purchaseId, 'approver_type' => 'warehouse_manager'],
+                [
+                    'approver_id' => $userId,
+                    'status' => 'approved',
+                    'approved_at' => now(),
+                    'approval_notes' => $notes,
+                ]
+            );
+
+            $purchase->update([
+                'status' => 'pending_allocation',
+            ]);
+
+            return $purchase->fresh();
+        });
+    }
+
+    /**
+     * ✅ تایید توسط متولی (بعد از تایید انبار) → می‌رود به pending_allocation
+     */
+    /**
+     * تایید توسط متولی (با ثبت خروج موقت)
+     */
+    public function approveByCustodian(int $purchaseId, int $userId, ?string $notes, array $temporaryExits = [])
+    {
+        return DB::transaction(function () use ($purchaseId, $userId, $notes, $temporaryExits) {
+            $purchase = Purchase::findOrFail($purchaseId);
+
+            if (!$purchase->canBeApprovedByCustodian()) {
+                throw new \Exception('این خرید در وضعیت تایید متولی نیست');
+            }
+
+            // ثبت تایید
+            Approval::updateOrCreate(
+                ['purchase_id' => $purchaseId, 'approver_type' => 'custodian'],
+                [
+                    'approver_id' => $userId,
+                    'status' => 'approved',
+                    'approved_at' => now(),
+                    'approval_notes' => $notes,
+                ]
+            );
+
+            // ثبت خروج‌های موقت
+            foreach ($temporaryExits as $exit) {
+                $allocation = Allocation::where('purchase_id', $purchaseId)
+                    ->findOrFail($exit['allocation_id']);
+
+                // بررسی اینکه مقدار خروج از مقدار موجود در قرنطینه بیشتر نباشد
+                $remainingInQuarantine = $allocation->allocated_qty - $allocation->temporary_exit_qty - $allocation->received_qty;
+                if ($exit['quantity'] > $remainingInQuarantine) {
+                    throw new \Exception("مقدار خروج برای allocation #{$allocation->id} بیشتر از موجودی قرنطینه است");
+                }
+
+                TemporaryExit::create([
+                    'allocation_id' => $allocation->id,
+                    'purchase_id' => $purchaseId,
+                    'quantity' => $exit['quantity'],
+                    'target_type' => $exit['target_type'] ?? 'equipment',
+                    'target_code' => $exit['target_code'],
+                    'target_description' => $exit['target_description'],
+                    'site_name' => $exit['site_name'] ?? null,
+                    'registered_by' => $userId,
+                    'notes' => $exit['notes'] ?? null,
+                    'exit_date' => now(),
+                ]);
+
+                // به‌روزرسانی temporary_exit_qty در allocation
+                $allocation->increment('temporary_exit_qty', $exit['quantity']);
+            }
+
+            // پس از تایید متولی و ثبت خروج‌های موقت، نوبت ثبت حواله بازرگانی است.
+            $purchase->update([
+                'status' => 'pending_commercial_voucher',
+                'custodian_approved_at' => now(),
+            ]);
+
+            return $purchase->fresh(['temporaryExits.registeredBy', 'temporaryExits.allocation']);
+        });
+    }
+
+    /**
+     * رد توسط متولی
+     */
+    public function rejectByCustodian(
+        int $purchaseId,
+        string $reason,
+        int $userId
+    ) {
+        return DB::transaction(function () use (
+            $purchaseId,
+            $reason,
+            $userId
+        ) {
+            $purchase = Purchase::findOrFail($purchaseId);
+
+            if (!$purchase->canBeApprovedByCustodian()) {
+                throw new \Exception(
+                    'این خرید در وضعیت تایید متولی نیست'
+                );
+            }
+
+            Approval::updateOrCreate(
+                [
+                    'purchase_id' => $purchaseId,
+                    'approver_type' => 'custodian',
+                ],
+                [
+                    'approver_id' => $userId,
+                    'status' => 'rejected',
+                    'rejection_reason' => $reason,
+                    'rejected_at' => now(),
+                ]
+            );
+
+            $purchase->update([
+                'status' => 'rejected_by_custodian',
+                'rejected_at' => now(),
+                'rejection_reason' => $reason,
+
+                // پاک‌سازی احتمالی اطلاعات برگشت قبلی
+                'warehouse_return_scheduled_at' => null,
+                'warehouse_return_scheduled_by' => null,
+                'commercial_received_at' => null,
+                'commercial_received_by' => null,
+                'supplier_returned_at' => null,
+                'supplier_returned_by' => null,
+                'return_notes' => null,
+            ]);
+
+            return $purchase->fresh();
+        });
+    }
+
+    /**
+     * ✅ ورود شماره حواله توسط بازرگانی
+     */
+    public function enterVoucherNumber(int $purchaseId, int $userId, string $voucherNumber)
+    {
+        return DB::transaction(function () use ($purchaseId, $userId, $voucherNumber) {
+            $purchase = Purchase::findOrFail($purchaseId);
+
+            if ($purchase->status !== 'pending_commercial_voucher') {
+                throw new \Exception('این خرید در وضعیت ورود حواله نیست');
+            }
+
+            $exists = Purchase::where('voucher_number', $voucherNumber)
+                ->where('id', '!=', $purchaseId)
+                ->exists();
+
+            if ($exists) {
+                throw new \Exception("شماره حواله '{$voucherNumber}' قبلاً ثبت شده است");
+            }
+
+            $purchase->update([
+                'status' => 'pending_warehouse_receipt',
+                'voucher_number' => $voucherNumber,
+                'voucher_entered_by' => $userId,
+                'voucher_entered_at' => now(),
+            ]);
+
+            return $purchase->fresh();
+        });
+    }
+
+    /**
+     * ✅ ورود شماره رسید انبار
+     */
+    public function enterWarehouseReceipt(int $purchaseId, int $userId, string $receiptNumber)
+    {
+        return DB::transaction(function () use ($purchaseId, $userId, $receiptNumber) {
+            $purchase = Purchase::findOrFail($purchaseId);
+
+            if ($purchase->status !== 'pending_warehouse_receipt') {
+                throw new \Exception('این خرید در وضعیت ورود رسید انبار نیست');
+            }
+
+            $exists = Purchase::where('warehouse_receipt_number', $receiptNumber)
+                ->where('id', '!=', $purchaseId)
+                ->exists();
+
+            if ($exists) {
+                throw new \Exception("شماره رسید '{$receiptNumber}' قبلاً ثبت شده است");
+            }
+
+            // خروج‌های موقت از مقدار قابل نگهداری کسر می‌شوند؛ مقدار منفی نباید
+            // باعث تکمیل زودهنگام یا وضعیت نامعتبر خرید شود.
+            $remainingQty = $purchase->allocations()
+                ->get(['allocated_qty', 'temporary_exit_qty'])
+                ->sum(fn ($allocation) => max(
+                    0,
+                    (int) $allocation->allocated_qty - (int) ($allocation->temporary_exit_qty ?? 0)
+                ));
+            $hasRemainingForStorage = $remainingQty > 0;
+            $purchase->update([
+                'status' => $hasRemainingForStorage ? 'pending_final_allocation' : 'fully_received',
+                'warehouse_receipt_number' => $receiptNumber,
+                'receipt_entered_by' => $userId,
+                'receipt_entered_at' => now(),
+                'fully_received_at' => $hasRemainingForStorage ? null : now(),
+            ]);
+
+            return $purchase->fresh();
+        });
+    }
+
+
+    /**
+     * دریافت تخصیص متعلق به یک خرید، همراه با اطلاعات انبار
+     */
+    public function findAllocationByIdForPurchase(
+        int $allocationId,
+        int $purchaseId
+    ): ?Allocation {
+        return Allocation::with('warehouse')
+            ->where('purchase_id', $purchaseId)
+            ->find($allocationId);
+    }
+
+
+    public function scheduleWarehouseReturn(
+        int $purchaseId,
+        int $userId,
+        string $scheduledAt,
+        ?string $notes = null
+    ) {
+        return DB::transaction(function () use (
+            $purchaseId,
+            $userId,
+            $scheduledAt,
+            $notes
+        ) {
+            $purchase = Purchase::findOrFail($purchaseId);
+
+            if (!$purchase->canScheduleWarehouseReturn()) {
+                throw new \Exception(
+                    'این خرید در وضعیت تعیین تاریخ تحویل به بازرگانی نیست'
+                );
+            }
+
+            $purchase->update([
+                'status' => 'warehouse_return_scheduled',
+                'warehouse_return_scheduled_at' => $scheduledAt,
+                'warehouse_return_scheduled_by' => $userId,
+                'return_notes' => $notes,
+            ]);
+
+            return $purchase->fresh();
+        });
+    }
+
+
+    public function confirmCommercialReceived(
+        int $purchaseId,
+        int $userId,
+        ?string $notes = null
+    ) {
+        return DB::transaction(function () use (
+            $purchaseId,
+            $userId,
+            $notes
+        ) {
+            $purchase = Purchase::findOrFail($purchaseId);
+
+            if (!$purchase->canConfirmCommercialReceived()) {
+                throw new \Exception(
+                    'این خرید در وضعیت تحویل به بازرگانی نیست'
+                );
+            }
+
+            $purchase->update([
+                'status' => 'commercial_received',
+                'commercial_received_at' => now(),
+                'commercial_received_by' => $userId,
+                'return_notes' => $notes,
+            ]);
+
+            return $purchase->fresh();
+        });
+    }
+
+    public function confirmSupplierReturned(
+        int $purchaseId,
+        int $userId,
+        ?string $notes = null
+    ) {
+        return DB::transaction(function () use (
+            $purchaseId,
+            $userId,
+            $notes
+        ) {
+            $purchase = Purchase::findOrFail($purchaseId);
+
+            if (!$purchase->canConfirmSupplierReturned()) {
+                throw new \Exception(
+                    'این خرید در وضعیت برگشت به تأمین‌کننده نیست'
+                );
+            }
+
+            $purchase->update([
+                'status' => 'supplier_returned',
+                'supplier_returned_at' => now(),
+                'supplier_returned_by' => $userId,
+                'return_notes' => $notes,
+            ]);
+
+            return $purchase->fresh();
+        });
+    }
+
+
 }

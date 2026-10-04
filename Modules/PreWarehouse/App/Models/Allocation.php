@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Modules\Auth\App\Models\User;
+use Illuminate\Database\Eloquent\Relations\HasOne; // ✅ اضافه کنید
 
 class Allocation extends Model
 {
@@ -21,6 +22,8 @@ class Allocation extends Model
         'purchase_id', 'warehouse_id', 'allocated_qty', 'received_qty',
         'status', 'received_by', 'received_at', 'receive_notes',
         'rejection_reason', 'rejected_by', 'rejected_at',
+        'temporary_exit_qty',  // ✅ جدید
+
     ];
 
     protected $casts = [
@@ -28,6 +31,7 @@ class Allocation extends Model
         'received_qty' => 'integer',
         'received_at' => 'datetime',
         'rejected_at' => 'datetime',
+        'temporary_exit_qty' => 'integer',  // ✅ جدید
     ];
 
     // Relations
@@ -35,6 +39,26 @@ class Allocation extends Model
     {
         return $this->belongsTo(Purchase::class);
     }
+
+
+    // اضافه کردن relation جدید:
+    public function temporaryExits(): HasMany
+    {
+        return $this->hasMany(TemporaryExit::class);
+    }
+
+// اضافه کردن helper:
+    public function getRemainingInQuarantineAttribute(): int
+    {
+        return $this->allocated_qty - $this->temporary_exit_qty - $this->received_qty;
+    }
+
+    public function getTotalTemporaryExitAttribute(): int
+    {
+        return $this->temporaryExits()->sum('quantity');
+    }
+
+
 
     public function warehouse(): BelongsTo
     {
@@ -79,6 +103,31 @@ class Allocation extends Model
             'fully_received' => 'دریافت کامل',
             'rejected' => 'رد شده',
             'rejected_by_destination' => 'رد شده توسط مقصد',
+            'location_assigned' => 'محل تعیین شده',  // ✅ اضافه شد
+
+            'in_quarantine' => 'در قرنطینه',  // ✅ جدید
+
         ][$this->status] ?? $this->status;
+    }
+
+    public function location(): HasOne
+    {
+        return $this->hasOne(Location::class);
+    }
+
+    /**
+     * رنگ وضعیت
+     */
+    public function getStatusColorAttribute(): string
+    {
+        return [
+            'pending' => 'bg-yellow-100 text-yellow-800',
+            'partially_received' => 'bg-orange-100 text-orange-800',
+            'fully_received' => 'bg-green-100 text-green-800',
+            'rejected' => 'bg-red-100 text-red-800',
+            'rejected_by_destination' => 'bg-pink-100 text-pink-800',
+            'location_assigned' => 'bg-teal-100 text-teal-800',  // ✅ اضافه شد
+            'in_quarantine' => 'bg-orange-100 text-orange-800',  // ✅ جدید
+        ][$this->status] ?? 'bg-gray-100 text-gray-800';
     }
 }

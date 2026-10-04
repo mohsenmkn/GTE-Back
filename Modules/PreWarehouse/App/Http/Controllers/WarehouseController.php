@@ -160,4 +160,24 @@ class WarehouseController extends Controller
             ]),
         ]);
     }
+
+
+    /**
+     * دریافت یا ایجاد قرنطینه انبار
+     */
+    public function quarantine($id)
+    {
+        $warehouse = Warehouse::findOrFail($id);
+        $quarantine = $warehouse->ensureQuarantine();
+
+        return response()->json([
+            'data' => [
+                'id' => $quarantine->id,
+                'name' => $quarantine->name,
+                'code' => $quarantine->code,
+                'is_quarantine' => $quarantine->is_quarantine,
+            ],
+        ]);
+    }
+
 }

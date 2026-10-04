@@ -65,12 +65,21 @@ class PurchaseController extends Controller
             'unit_of_measurement' => 'required|string|max:50',
             'target_unit_id' => 'nullable|exists:organizational_units,id',
             'description' => 'nullable|string|max:1000',
+
+            // ✅ فیلدهای جدید اجباری
+            'supplier' => 'required|string|max:255',
+            'brand' => 'required|string|max:255',
+            'item_code' => 'required|string|max:100',
+
             'metadata' => 'nullable|array',
         ], [
             'item_id.required' => 'انتخاب کالا الزامی است',
             'quantity.required' => 'مقدار کالا الزامی است',
             'quantity.min' => 'مقدار کالا باید حداقل 1 باشد',
             'unit_of_measurement.required' => 'واحد اندازه‌گیری الزامی است',
+            'supplier.required' => 'نام تامین‌کننده الزامی است',
+            'brand.required' => 'برند محصول الزامی است',
+            'item_code.required' => 'کد کالا الزامی است',
         ]);
 
         $purchase = $this->service->createPurchase($validated, $request->user()->id);
@@ -119,7 +128,7 @@ class PurchaseController extends Controller
             );
 
             return response()->json([
-                'message' => 'خرید تایید شد و به متولی ارسال شد',
+                'message' => 'خرید تایید شد و برای تخصیص انبار ارسال شد',
                 'data' => PurchaseResource::make($purchase),
             ]);
         } catch (\Exception $e) {
@@ -154,57 +163,6 @@ class PurchaseController extends Controller
         }
     }
 
-    /**
-     * تایید توسط متولی
-     */
-    public function approveByCustodian(Request $request, int $id)
-    {
-        $validated = $request->validate([
-            'notes' => 'nullable|string|max:500',
-        ]);
-
-        try {
-            $purchase = $this->service->approveByCustodian(
-                $id,
-                $request->user()->id,
-                $validated['notes'] ?? null
-            );
-
-            return response()->json([
-                'message' => 'خرید تایید شد و آماده تخصیص است',
-                'data' => PurchaseResource::make($purchase),
-            ]);
-        } catch (\Exception $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
-    }
-
-    /**
-     * رد توسط متولی
-     */
-    public function rejectByCustodian(Request $request, int $id)
-    {
-        $validated = $request->validate([
-            'reason' => 'required|string|max:500',
-        ], [
-            'reason.required' => 'دلیل رد کردن الزامی است',
-        ]);
-
-        try {
-            $purchase = $this->service->rejectByCustodian(
-                $id,
-                $validated['reason'],
-                $request->user()->id
-            );
-
-            return response()->json([
-                'message' => 'خرید رد شد',
-                'data' => PurchaseResource::make($purchase),
-            ]);
-        } catch (\Exception $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
-    }
 
     /**
      * تخصیص به انبارها
@@ -271,6 +229,7 @@ class PurchaseController extends Controller
     public function assignLocation(Request $request, int $id)
     {
         $validated = $request->validate([
+            'warehouse_id' => 'nullable|exists:warehouses,id',
             'warehouse_location_id' => 'nullable|exists:warehouse_locations,id',
             'location_name' => 'required|string|max:255',
             'description' => 'nullable|string|max:1000',
@@ -361,4 +320,234 @@ class PurchaseController extends Controller
             }),
         ]);
     }
+
+
+
+    /**
+     * ✅ تایید نهایی متولی (بعد از تخصیص)
+     */
+    public function finalApproveByCustodian(Request $request, int $id)
+    {
+        $validated = $request->validate([
+            'notes' => 'nullable|string|max:500',
+        ]);
+
+        try {
+            $purchase = $this->service->finalApproveByCustodian(
+                $id,
+                $request->user()->id,
+                $validated['notes'] ?? null
+            );
+
+            return response()->json([
+                'message' => 'کالا تایید نهایی شد و آماده ورود حواله است',
+                'data' => PurchaseResource::make($purchase),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+
+
+
+    /**
+     * ✅ تایید توسط متولی (بعد از تایید انبار)
+     */
+    /**
+     * تایید توسط متولی (با خروج موقت)
+     */
+    public function approveByCustodian(Request $request, int $id)
+    {
+        $validated = $request->validate([
+            'notes' => 'nullable|string|max:500',
+            'temporary_exits' => 'nullable|array',
+            'temporary_exits.*.allocation_id' => 'required|exists:pre_warehouse_allocations,id',
+            'temporary_exits.*.quantity' => 'required|integer|min:1',
+            'temporary_exits.*.target_type' => 'nullable|string|in:equipment,vehicle,project,other',
+            'temporary_exits.*.target_code' => 'required|string|max:100',
+            'temporary_exits.*.target_description' => 'required|string|max:500',
+            'temporary_exits.*.site_name' => 'nullable|string|max:255',
+            'temporary_exits.*.notes' => 'nullable|string|max:1000',
+        ], [
+            'temporary_exits.*.quantity.required' => 'مقدار خروج الزامی است',
+            'temporary_exits.*.quantity.min' => 'مقدار خروج باید حداقل 1 باشد',
+            'temporary_exits.*.target_code.required' => 'کد تجهیز/وسیله الزامی است',
+            'temporary_exits.*.target_description.required' => 'توضیحات محل مصرف الزامی است',
+        ]);
+
+        try {
+            $purchase = $this->service->approveByCustodian(
+                $id,
+                $request->user()->id,
+                $validated['notes'] ?? null,
+                $validated['temporary_exits'] ?? []
+            );
+
+            return response()->json([
+                'message' => 'خرید تایید شد و خروج‌های موقت ثبت شدند',
+                'data' => PurchaseResource::make($purchase),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
+     * رد توسط متولی
+     */
+    public function rejectByCustodian(Request $request, int $id)
+    {
+        $validated = $request->validate([
+            'reason' => 'required|string|max:500',
+        ], [
+            'reason.required' => 'دلیل رد کردن الزامی است',
+        ]);
+
+        try {
+            $purchase = $this->service->rejectByCustodian(
+                $id,
+                $validated['reason'],
+                $request->user()->id
+            );
+
+            return response()->json([
+                'message' => 'خرید رد شد',
+                'data' => PurchaseResource::make($purchase),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
+     * ✅ ورود شماره حواله توسط بازرگانی
+     */
+    public function enterVoucher(Request $request, int $id)
+    {
+        $validated = $request->validate([
+            'voucher_number' => 'required|string|max:100',
+        ], [
+            'voucher_number.required' => 'شماره حواله الزامی است',
+        ]);
+
+        try {
+            $purchase = $this->service->enterVoucherNumber(
+                $id,
+                $request->user()->id,
+                $validated['voucher_number']
+            );
+
+            return response()->json([
+                'message' => 'شماره حواله با موفقیت ثبت شد',
+                'data' => PurchaseResource::make($purchase),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
+     * ✅ ورود شماره رسید انبار
+     */
+    public function enterWarehouseReceipt(Request $request, int $id)
+    {
+        $validated = $request->validate([
+            'receipt_number' => 'required|string|max:100',
+        ], [
+            'receipt_number.required' => 'شماره رسید انبار الزامی است',
+        ]);
+
+        try {
+            $purchase = $this->service->enterWarehouseReceipt(
+                $id,
+                $request->user()->id,
+                $validated['receipt_number']
+            );
+
+            $message = $purchase->status === 'pending_final_allocation'
+                ? 'رسید انبار ثبت شد؛ اکنون انبار مقصد و محل نگهداری تعداد باقیمانده را مشخص کنید'
+                : 'رسید انبار ثبت شد و به دلیل خروج موقت کامل، مقدار قابل نگهداری باقی نمانده است';
+
+            return response()->json([
+                'message' => $message,
+                'data' => PurchaseResource::make($purchase),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    /** تایید تحویل گرفتن کالای مرجوعی توسط بازرگانی */
+
+    /**
+     * ثبت تاریخ تحویل کالای مرجوعی به بازرگانی توسط انبار
+     */
+    public function scheduleWarehouseReturn(Request $request, int $id)
+    {
+        $validated = $request->validate([
+            'scheduled_at' => 'required|date',
+            'notes' => 'nullable|string|max:1000',
+        ], [
+            'scheduled_at.required' => 'تاریخ تحویل الزامی است',
+        ]);
+
+        try {
+            $purchase = $this->service->scheduleWarehouseReturn(
+                $id,
+                $request->user()->id,
+                $validated['scheduled_at'],
+                $validated['notes'] ?? null
+            );
+
+            return response()->json([
+                'message' => 'تاریخ تحویل به بازرگانی با موفقیت ثبت شد',
+                'data' => PurchaseResource::make($purchase),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
+     * تایید تحویل گرفتن کالای مرجوعی توسط بازرگانی
+     */
+    public function confirmCommercialReceived(Request $request, int $id)
+    {
+        try {
+            $purchase = $this->service->confirmCommercialReceived(
+                $id,
+                $request->user()->id
+            );
+
+            return response()->json([
+                'message' => 'تحویل کالای مرجوعی توسط بازرگانی با موفقیت ثبت شد',
+                'data' => PurchaseResource::make($purchase),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+    /**
+     * ثبت برگشت کالا به تأمین‌کننده توسط بازرگانی
+     */
+    public function confirmSupplierReturned(Request $request, int $id)
+    {
+        try {
+            $purchase = $this->service->confirmSupplierReturned(
+                $id,
+                $request->user()->id
+            );
+
+            return response()->json([
+                'message' => 'برگشت کالا به تأمین‌کننده با موفقیت ثبت شد',
+                'data' => PurchaseResource::make($purchase),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
+
 }
