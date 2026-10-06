@@ -3,8 +3,12 @@ namespace Modules\Assessment\App\Services;
 
 use Modules\Assessment\App\Models\Assessment;
 use Modules\Assessment\App\Models\AssessmentAnswer;
+use Modules\Assessment\App\Models\AssessmentCycle;
 use Modules\Assessment\App\Models\AssessmentGap;
 use Modules\Assessment\App\Models\AssessmentQuestion;
+use Modules\Assessment\App\Models\AssessmentCategory;
+use Modules\Assessment\App\Models\AssessmentPost;
+use Illuminate\Support\Collection;
 
 class AssessmentService
 {
@@ -86,24 +90,7 @@ class AssessmentService
         ]);
     }
 
-    /**
-     * دریافت فرم ارزیابی با تمام داده‌های مورد نیاز
-     *
-     * @param int $assessmentId
-     * @return array
-     */
-    /**
-     * دریافت فرم ارزیابی با تمام داده‌های مورد نیاز
-     *
-     * @param Assessment $assessment (تغییر از int به Assessment)
-     * @return array
-     */
-    /**
-     * دریافت فرم ارزیابی با سوالات مربوط به شناسنامه شغل
-     *
-     * @param Assessment $assessment
-     * @return array
-     */
+
     public function getForm(Assessment $assessment): array
     {
         // لود کردن روابط مورد نیاز
@@ -166,5 +153,68 @@ class AssessmentService
             ],
         ];
     }
+
+
+    /**
+     * ✅ ایجاد چرخه ارزیابی جدید
+     */
+    public function createCycle(array $data): AssessmentCycle
+    {
+        $validated = validator($data, [
+            'title' => 'required|string|max:255',
+            'type' => 'required|in:annual,transfer,project',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after:start_date',
+            'status' => 'nullable|in:draft,active,completed,cancelled',
+            'description' => 'nullable|string|max:1000',
+        ])->validate();
+
+        // مقدار پیش‌فرض status
+        if (!isset($validated['status'])) {
+            $validated['status'] = 'draft';
+        }
+
+        return AssessmentCycle::create($validated);
+    }
+
+    /**
+     * ✅ دریافت لیست چرخه‌ها
+     */
+    public function getCycles(): Collection
+    {
+        return AssessmentCycle::orderBy('created_at', 'desc')->get();
+    }
+
+    /**
+     * ✅ به‌روزرسانی چرخه
+     */
+    public function updateCycle(int $cycleId, array $data): AssessmentCycle
+    {
+        $cycle = AssessmentCycle::findOrFail($cycleId);
+
+        $validated = validator($data, [
+            'title' => 'required|string|max:255',
+            'type' => 'required|in:annual,transfer,project',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after:start_date',
+            'status' => 'nullable|in:draft,active,completed,cancelled',
+            'description' => 'nullable|string|max:1000',
+        ])->validate();
+
+        $cycle->update($validated);
+
+        return $cycle->fresh();
+    }
+
+    /**
+     * ✅ حذف چرخه
+     */
+    public function deleteCycle(int $cycleId): bool
+    {
+        $cycle = AssessmentCycle::findOrFail($cycleId);
+        return $cycle->delete();
+    }
+
+
 
 }

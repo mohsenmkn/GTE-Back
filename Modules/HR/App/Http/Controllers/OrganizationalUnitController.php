@@ -157,4 +157,30 @@ class OrganizationalUnitController
         }
     }
 
+
+    public function index(): JsonResponse
+    {
+        $units = OrganizationalUnit::where('is_active', true)
+            ->orderBy('path')
+            ->select(['id', 'title', 'code', 'level', 'parent_id'])
+            ->get()
+            ->map(function ($unit) {
+                // ایجاد تورفتگی بر اساس سطح برای نمایش بهتر در dropdown
+                $indent = str_repeat('— ', $unit->level - 1);
+                return [
+                    'id'        => $unit->id,
+                    'title'     => $indent . $unit->title,
+                    'raw_title' => $unit->title,
+                    'code'      => $unit->code,
+                    'level'     => $unit->level,
+                    'parent_id' => $unit->parent_id,
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'data'    => $units,
+        ]);
+    }
+
 }

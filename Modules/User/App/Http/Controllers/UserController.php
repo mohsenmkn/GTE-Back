@@ -3,6 +3,7 @@
 namespace Modules\User\App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -482,5 +483,28 @@ public function index(Request $request)
         return response()->json(['data' => $users]);
     }
 
+
+    // در فایل UserController.php
+
+    public function search(Request $request): JsonResponse
+    {
+        $query = User::query()->where('is_active', true);
+
+        if ($request->filled('q')) {
+            $search = trim($request->input('q'));
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('mobile', 'like', "%{$search}%")
+                    ->orWhere('personnel_code', 'like', "%{$search}%")
+                    ->orWhere('national_code', 'like', "%{$search}%");
+            });
+        }
+
+        $users = $query->select('id', 'name', 'mobile', 'personnel_code', 'national_code')
+            ->limit(20)
+            ->get();
+
+        return response()->json(['data' => $users]);
+    }
 
 }

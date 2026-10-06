@@ -7,6 +7,7 @@ use Modules\HR\App\Http\Controllers\OrganizationalPositionController;
 use Modules\HR\App\Http\Controllers\OrganizationalUnitController;
 use Modules\HR\App\Http\Controllers\OrgChartController;
 use Modules\HR\App\Http\Controllers\OrgStructureController;
+use Modules\User\App\Http\Controllers\UserController;
 
 /*
     |--------------------------------------------------------------------------
@@ -151,16 +152,18 @@ Route::middleware(['auth:sanctum', 'user.can_login'])->prefix('v1/hr')->name('hr
         ->whereNumber('unit')
         ->name('org-structure.update');
 
+    Route::prefix('/organizational-units')->group(function () {
+        Route::get('/', [OrganizationalUnitController::class, 'index']);
+        Route::post('/{organizationalUnit}/move', [OrganizationalUnitController::class, 'move']);
+    });
+
+    Route::get('/users/search', [UserController::class, 'search'])->middleware('permission:hr.manage');
+
 // ✅ حذف واحد
     Route::delete('/org-structure/{unit}', [OrgStructureController::class, 'destroy'])
         ->middleware('permission:hr.manage')
         ->whereNumber('unit')
         ->name('org-structure.destroy');
-
-
-
-
-
 
             Route::post(
                 '/organizational-units/{organizationalUnit}/move',
@@ -175,7 +178,6 @@ Route::middleware(['auth:sanctum', 'user.can_login'])->prefix('v1/hr')->name('hr
                 '/organizational-positions/{organizationalPosition}/move',
                 [OrganizationalPositionController::class, 'move']
             );
-
 
 
             Route::apiResource(

@@ -115,6 +115,11 @@ class OrganizationalPositionController
                 'nullable',
                 'string',
             ],
+            'user_id' => [
+                'nullable',
+                'integer',
+                'exists:users,id',
+            ],
         ]);
 
         try {
@@ -161,54 +166,50 @@ class OrganizationalPositionController
      * ویرایش
      */
     public function update(
-        Request                $request,
+        Request $request,
         OrganizationalPosition $organizationalPosition
-    ): JsonResponse
-    {
-
+    ): JsonResponse {
         $validated = $request->validate([
+            'user_id' => [ // <--- این خط را اضافه کنید
+                'nullable',
+                'integer',
+                'exists:users,id',
+            ],
             'parent_id' => [
                 'nullable',
                 'integer',
                 'exists:organizational_positions,id',
             ],
-
             'post_code' => [
                 'nullable',
                 'string',
                 'max:50',
             ],
-
             'post_title' => [
                 'sometimes',
                 'required',
                 'string',
                 'max:255',
             ],
-
             'job_code' => [
                 'nullable',
                 'string',
                 'max:50',
             ],
-
             'job_title' => [
                 'nullable',
                 'string',
                 'max:255',
             ],
-
             'is_active' => [
                 'nullable',
                 'boolean',
             ],
-
             'sort_order' => [
                 'nullable',
                 'integer',
                 'min:0',
             ],
-
             'description' => [
                 'nullable',
                 'string',
@@ -216,7 +217,6 @@ class OrganizationalPositionController
         ]);
 
         try {
-
             $position = $this->service->update(
                 $organizationalPosition,
                 $validated
@@ -227,9 +227,7 @@ class OrganizationalPositionController
                 'message' => 'سمت با موفقیت ویرایش شد.',
                 'data' => $position,
             ]);
-
         } catch (Throwable $e) {
-
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage(),

@@ -30,22 +30,8 @@ class AssessmentController extends Controller
     {
         $user = $request->user();
 
-        // ✅ دریافت واحد سازمانی کاربر فعلی از جدول employee_positions
-        $userPosition = \Modules\HR\App\Models\EmployeePosition::where('user_id', $user->id)->first();
-        $userUnitId = $userPosition?->organizational_unit_id;
-
         $query = Assessment::with(['employee', 'evaluator', 'post', 'cycle'])
             ->where('evaluator_user_id', $user->id);
-
-        // ✅ فیلتر بر اساس واحد سازمانی (اگر کاربر واحد دارد)
-        if ($userUnitId) {
-            // پیدا کردن user_id های پرسنل در همان واحد سازمانی
-            $employeeUserIds = \Modules\HR\App\Models\EmployeePosition::where('organizational_unit_id', $userUnitId)
-                ->pluck('user_id');
-
-            // فیلتر ارزیابی‌ها بر اساس employee_user_id
-            $query->whereIn('employee_user_id', $employeeUserIds);
-        }
 
         // فیلترهای اختیاری
         if ($request->filled('status')) {
@@ -220,6 +206,12 @@ class AssessmentController extends Controller
      */
     public function gaps(Assessment $assessment): JsonResponse
     {
+        $user = request()->user();
+        if (!$user->can('assessment.manage') && (int) $assessment->evaluator_user_id !== (int) $user->id
+            && !((int) $assessment->employee_user_id === (int) $user->id && $assessment->status === Assessment::STATUS_APPROVED)) {
+            return response()->json(['message' => 'دسترسی به این ارزیابی ندارید.'], 403);
+        }
+
         $gaps = $assessment->gaps()
             ->with(['question.category', 'actions.method'])
             ->orderByDesc('weighted_gap')
@@ -247,6 +239,11 @@ class AssessmentController extends Controller
      */
     public function storeAction(Request $request, Assessment $assessment): JsonResponse
     {
+        if (!$request->user()->can('assessment.manage')
+            && (int) $assessment->evaluator_user_id !== (int) $request->user()->id) {
+            return response()->json(['message' => 'دسترسی به این ارزیابی ندارید.'], 403);
+        }
+
         $validated = $request->validate([
             'gap_id'     => 'required|exists:assessment_gaps,id',
             'method_id'  => 'nullable|exists:assessment_methods,id',
@@ -559,13 +556,7 @@ class AssessmentController extends Controller
 
         $classifier = app(\Modules\Assessment\App\Services\JobFamilyClassifier::class);
         $family = $classifier->classify($position->post_title);
-
-        if (!$family) {
-            return response()->json(['post_id' => null, 'post_title' => $position->post_title]);
-        }
-
-        // ✅ جستجو بر اساس grade + unit
-        $post = AssessmentPost::findByGradeAndUnit($family, $position->unit?->title);
+        $post = app(\Modules\Assessment\App\Services\AssessmentAssignmentService::class)->profileFor($position);
 
         return response()->json([
             'post_id'    => $post?->id,

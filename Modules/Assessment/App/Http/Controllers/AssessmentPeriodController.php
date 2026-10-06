@@ -92,7 +92,7 @@ class AssessmentPeriodController extends Controller
             ], 422);
         }
 
-        $result = $this->bulkService->generate($period);
+        $result = $this->bulkService->generateForPeriod($period);
 
         return response()->json([
             'message' => "ارزیابی‌ها با موفقیت ساخته شدند.",

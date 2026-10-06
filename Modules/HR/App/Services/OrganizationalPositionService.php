@@ -6,6 +6,8 @@ namespace Modules\HR\App\Services;
 use Illuminate\Support\Facades\DB;
 use Modules\HR\App\Models\OrganizationalPosition;
 use Modules\HR\App\Models\OrganizationalUnit;
+use Modules\Auth\App\Models\User;
+use Modules\HR\App\Models\EmployeePosition;
 use RuntimeException;
 
 class OrganizationalPositionService
@@ -223,48 +225,57 @@ class OrganizationalPositionService
     /**
      * ایجاد سمت
      */
+// در فایل OrganizationalPositionService.php
+
+
     public function create(array $data): OrganizationalPosition
     {
         return DB::transaction(function () use ($data) {
-
-            $unit = OrganizationalUnit::findOrFail(
-                $data['organizational_unit_id']
-            );
-
+            $unit = OrganizationalUnit::findOrFail($data['organizational_unit_id']);
             $parentId = $data['parent_id'] ?? null;
 
             if ($parentId) {
                 $parent = OrganizationalPosition::findOrFail($parentId);
-
-                $this->validateParent(
-                    null,
-                    $parent,
-                    $unit
-                );
+                $this->validateParent(null, $parent, $unit);
             }
 
-            $sortOrder = $data['sort_order']
-                ?? $this->nextSortOrder($unit->id, $parentId);
+            $sortOrder = $data['sort_order'] ?? $this->nextSortOrder($unit->id, $parentId);
 
-            return OrganizationalPosition::create([
+            // ۱. ایجاد سمت
+            $position = OrganizationalPosition::create([
                 'organizational_unit_id' => $unit->id,
-                'parent_id' => $parentId,
-
-                'gt_post_ref' => $data['gt_post_ref'] ?? null,
-                'post_code' => $data['post_code'] ?? null,
-                'post_title' => $data['post_title'] ?? null,
-
-                'gt_job_ref' => $data['gt_job_ref'] ?? null,
-                'job_code' => $data['job_code'] ?? null,
-                'job_title' => $data['job_title'] ?? null,
-
-                'is_custom' => $data['is_custom'] ?? true,
-                'is_active' => $data['is_active'] ?? true,
-
-                'sort_order' => $sortOrder,
-
-                'description' => $data['description'] ?? null,
+                'parent_id'              => $parentId,
+                'gt_post_ref'            => $data['gt_post_ref'] ?? null,
+                'post_code'              => $data['post_code'] ?? null,
+                'post_title'             => $data['post_title'] ?? null,
+                'gt_job_ref'             => $data['gt_job_ref'] ?? null,
+                'job_code'               => $data['job_code'] ?? null,
+                'job_title'              => $data['job_title'] ?? null,
+                'is_custom'              => $data['is_custom'] ?? true,
+                'is_active'              => $data['is_active'] ?? true,
+                'sort_order'             => $sortOrder,
+                'description'            => $data['description'] ?? null,
             ]);
+
+            // ۲. اگر کاربری انتخاب شده بود، رابطه را در employee_positions ثبت کن
+            if (!empty($data['user_id'])) {
+                $user = User::findOrFail($data['user_id']);
+
+                EmployeePosition::create([
+                    'user_id'                  => $user->id,
+                    'personnel_code'           => $user->personnel_code,
+                    'organizational_unit_id'   => $position->organizational_unit_id,
+                    'organizational_position_id'=> $position->id,
+                    'post_code'                => $position->post_code,
+                    'post_title'               => $position->post_title,
+                    'gt_post_ref'              => $position->gt_post_ref,
+                    'job_code'                 => $position->job_code,
+                    'job_title'                => $position->job_title,
+                    'gt_job_ref'               => $position->gt_job_ref,
+                ]);
+            }
+
+            return $position;
         });
     }
 
@@ -276,33 +287,23 @@ class OrganizationalPositionService
         array                  $data
     ): OrganizationalPosition
     {
-
         return DB::transaction(function () use ($position, $data) {
 
+            // ── به‌روزرسانی parent_id ─────────────────────────
             if (array_key_exists('parent_id', $data)) {
-
                 $parentId = $data['parent_id'];
 
                 if ($parentId) {
+                    $parent = OrganizationalPosition::findOrFail($parentId);
+                    $unit = OrganizationalUnit::findOrFail($position->organizational_unit_id);
 
-                    $parent = OrganizationalPosition::findOrFail(
-                        $parentId
-                    );
-
-                    $unit = OrganizationalUnit::findOrFail(
-                        $position->organizational_unit_id
-                    );
-
-                    $this->validateParent(
-                        $position,
-                        $parent,
-                        $unit
-                    );
+                    $this->validateParent($position, $parent, $unit);
                 }
 
                 $position->parent_id = $parentId;
             }
 
+            // ── به‌روزرسانی سایر فیلدها ──────────────────────
             if (array_key_exists('post_title', $data)) {
                 $position->post_title = $data['post_title'];
             }
@@ -333,11 +334,51 @@ class OrganizationalPositionService
 
             $position->save();
 
+            // ── مدیریت تخصیص پرسنل (جدید) ───────────────────
+            if (array_key_exists('user_id', $data)) {
+                $this->syncEmployeePosition($position, $data['user_id']);
+            }
+
             return $position->fresh([
                 'unit',
                 'parent',
+                'employees.user', // برای بازگرداندن اطلاعات پرسنل جدید
             ]);
         });
+    }
+
+    /**
+     * همگام‌سازی نگاشت پرسنل با سمت
+     * - اگر user_id معتبر باشد: رکورد را ایجاد/به‌روزرسانی می‌کند
+     * - اگر null باشد: رکورد نگاشت را حذف می‌کند
+     */
+    private function syncEmployeePosition(OrganizationalPosition $position, ?int $userId): void
+    {
+        // ۱. حذف نگاشت فعلی سمت (کاربر قبلی از این سمت خارج می‌شود)
+        EmployeePosition::where('organizational_position_id', $position->id)->delete();
+
+        // ۲. اگر کاربر جدیدی انتخاب شده
+        if ($userId) {
+            $user = User::findOrFail($userId);
+
+            // ۳. حذف رکورد قبلی این کاربر از هر سمت دیگری
+            // (به دلیل unique constraint روی user_id)
+            EmployeePosition::where('user_id', $user->id)->delete();
+
+            // ۴. ایجاد رکورد جدید برای این کاربر در سمت فعلی
+            EmployeePosition::create([
+                'user_id'                    => $user->id,
+                'personnel_code'             => $user->personnel_code,
+                'organizational_unit_id'     => $position->organizational_unit_id,
+                'organizational_position_id' => $position->id,
+                'post_code'                  => $position->post_code,
+                'post_title'                 => $position->post_title,
+                'gt_post_ref'                => $position->gt_post_ref,
+                'job_code'                   => $position->job_code,
+                'job_title'                  => $position->job_title,
+                'gt_job_ref'                 => $position->gt_job_ref,
+            ]);
+        }
     }
 
     /**
@@ -599,4 +640,7 @@ class OrganizationalPositionService
             }
         }
     }
+
+
+
 }

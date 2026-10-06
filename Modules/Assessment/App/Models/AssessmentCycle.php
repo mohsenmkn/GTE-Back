@@ -50,4 +50,10 @@ class AssessmentCycle extends Model
     {
         return $this->assessments()->count();
     }
+
+
+    public function periods(): HasMany
+    {
+        return $this->hasMany(AssessmentPeriod::class, 'cycle_id');
+    }
 }
