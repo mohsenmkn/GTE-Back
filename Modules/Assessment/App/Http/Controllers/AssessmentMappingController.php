@@ -1,6 +1,5 @@
 <?php
 
-
 namespace Modules\Assessment\App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
@@ -17,8 +16,9 @@ use Modules\HR\App\Models\OrganizationalUnit;
 class AssessmentMappingController extends Controller
 {
     public function __construct(
-        private JobFamilyClassifier $classifier,
+        public JobFamilyClassifier $classifier,
         private \Modules\Assessment\App\Services\AssessmentAssignmentService $assignments
+
     )
     {
     }
@@ -26,35 +26,29 @@ class AssessmentMappingController extends Controller
     /**
      * GET /assessment/mappings
      */
-    /**
-     * GET /assessment/mappings
-     */
     public function index(Request $request): JsonResponse
     {
-        // دریافت تمام نگاشت‌های فعال
         $mappings = AssessmentPostMapping::with(['assessmentPost', 'unit', 'creator'])
-            ->where('is_active', true)
             ->orderBy('created_at', 'desc')
             ->get();
 
-        // دریافت تمام شناسنامه‌های فعال
         $activePosts = AssessmentPost::where('is_active', true)
             ->orderBy('title')
             ->get(['id', 'title', 'grade', 'unit', 'domain']);
 
-        // دریافت تمام پست‌های سازمانی
         $allPositions = EmployeePosition::with('unit')
             ->whereNotNull('post_title')
             ->whereNotNull('organizational_unit_id')
             ->whereHas('user')
             ->get();
 
-        // ✅ فیلتر کردن پست‌های بدون شناسنامه
+        // ✅ فقط نگاشت‌های فعال را به profileFor بده
+        $activeMappings = $mappings->where('is_active', true);
+
         $unmappedPositions = $allPositions->filter(
-            fn($position) => !$this->assignments->profileFor($position, $activePosts, $mappings)
+            fn($position) => !$this->assignments->profileFor($position, $activePosts, $activeMappings)
         );
 
-        // گروه‌بندی بر اساس عنوان پست یکتا
         $unmappedPositions = $unmappedPositions
             ->groupBy('post_title')
             ->map(function ($group) {
@@ -77,9 +71,7 @@ class AssessmentMappingController extends Controller
 
     /**
      * POST /assessment/mappings
-     */
-    /**
-     * POST /assessment/mappings
+     * ✅ اصلاح‌شده: Upsert (ایجاد یا به‌روزرسانی)
      */
     public function store(Request $request): JsonResponse
     {
@@ -91,7 +83,7 @@ class AssessmentMappingController extends Controller
             'description' => 'nullable|string|max:500',
         ]);
 
-        // ✅ بررسی تکراری بودن با منطق دقیق‌تر
+        // ✅ جستجوی نگاشت قبلی
         $existingMapping = AssessmentPostMapping::where('mapping_type', $validated['mapping_type'])
             ->where(function ($q) use ($validated) {
                 if ($validated['mapping_type'] === 'title_pattern') {
@@ -107,7 +99,7 @@ class AssessmentMappingController extends Controller
             $existingMapping->update([
                 'assessment_post_id' => $validated['assessment_post_id'],
                 'description' => $validated['description'] ?? $existingMapping->description,
-                'is_active' => true,
+                'is_active' => true, // ✅ دوباره فعال کن
             ]);
 
             return response()->json([
@@ -161,8 +153,9 @@ class AssessmentMappingController extends Controller
     public function noEvaluator(Request $request): JsonResponse
     {
         $validated = $request->validate(['cycle_id' => 'required|integer|exists:assessment_cycles,id']);
+
         $startTime = microtime(true);
-        $plan = $this->assignments->plan((int) $validated['cycle_id']);
+        $plan = $this->assignments->plan((int)$validated['cycle_id']);
         $positions = collect($plan['rows'])->where('status', 'no_evaluator')->values();
 
         return response()->json([
@@ -177,6 +170,229 @@ class AssessmentMappingController extends Controller
     /**
      * POST /assessment/mappings/assign-evaluator
      */
+    public function assignEvaluator(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'cycle_id' => 'required|exists:assessment_cycles,id',
+            'user_id' => 'required|exists:users,id',
+            'evaluator_id' => 'required|exists:users,id',
+        ]);
+
+        if ((int)$validated['user_id'] === (int)$validated['evaluator_id']) {
+            return response()->json([
+                'message' => 'ارزیاب نمی‌تواند خود کارمند باشد',
+            ], 422);
+        }
+
+        $assessment = Assessment::where('cycle_id', $validated['cycle_id'])
+            ->where('employee_user_id', $validated['user_id'])->first();
+
+        if ($assessment && !in_array($assessment->status, [Assessment::STATUS_DRAFT, Assessment::STATUS_REJECTED], true)) {
+            return response()->json(['message' => 'ارزیابی ثبت‌شده قابل تغییر ارزیاب نیست.'], 422);
+        }
+
+        $employee = EmployeePosition::with('unit')->where('user_id', $validated['user_id'])->firstOrFail();
+        $post = $this->assignments->profileFor($employee);
+
+        if (!$assessment && !$post) {
+            return response()->json(['message' => 'شناسنامه شایستگی برای کارمند یافت نشد.'], 422);
+        }
+
+        $assessment = Assessment::updateOrCreate(
+            ['cycle_id' => $validated['cycle_id'], 'employee_user_id' => $validated['user_id']],
+            [
+                'evaluator_user_id' => $validated['evaluator_id'],
+                'post_id' => $assessment?->post_id ?? $post->id,
+            ]
+        );
+
+        return response()->json([
+            'message' => 'ارزیاب با موفقیت تعیین شد',
+            'assessment' => $assessment->load('employee', 'evaluator'),
+        ]);
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//old Code
+/*
+
+namespace Modules\Assessment\App\Http\Controllers;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Modules\Assessment\App\Models\Assessment;
+use Modules\Assessment\App\Models\AssessmentPost;
+use Modules\Assessment\App\Models\AssessmentPostMapping;
+use Modules\Assessment\App\Services\JobFamilyClassifier;
+use Modules\HR\App\Models\EmployeePosition;
+use Modules\HR\App\Models\OrganizationalUnit;
+
+class AssessmentMappingController extends Controller
+{
+    public function __construct(
+        private JobFamilyClassifier $classifier,
+        private \Modules\Assessment\App\Services\AssessmentAssignmentService $assignments
+    )
+    {
+    }
+
+
+    public function index(Request $request): JsonResponse
+    {
+        // دریافت تمام نگاشت‌های فعال
+        $mappings = AssessmentPostMapping::with(['assessmentPost', 'unit', 'creator'])
+            ->where('is_active', true)
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        // دریافت تمام شناسنامه‌های فعال
+        $activePosts = AssessmentPost::where('is_active', true)
+            ->orderBy('title')
+            ->get(['id', 'title', 'grade', 'unit', 'domain']);
+
+        // دریافت تمام پست‌های سازمانی
+        $allPositions = EmployeePosition::with('unit')
+            ->whereNotNull('post_title')
+            ->whereNotNull('organizational_unit_id')
+            ->whereHas('user')
+            ->get();
+
+        // ✅ فیلتر کردن پست‌های بدون شناسنامه
+        $unmappedPositions = $allPositions->filter(
+            fn($position) => !$this->assignments->profileFor($position, $activePosts, $mappings)
+        );
+
+        // گروه‌بندی بر اساس عنوان پست یکتا
+        $unmappedPositions = $unmappedPositions
+            ->groupBy('post_title')
+            ->map(function ($group) {
+                $first = $group->first();
+                return [
+                    'post_title' => $first->post_title,
+                    'unit' => $first->unit?->title,
+                    'unit_id' => $first->organizational_unit_id,
+                    'count' => $group->count(),
+                ];
+            })
+            ->values();
+
+        return response()->json([
+            'mappings' => $mappings,
+            'unmapped_positions' => $unmappedPositions,
+            'available_posts' => $activePosts,
+        ]);
+    }
+
+
+    public function store(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'mapping_type' => 'required|in:title_pattern,unit',
+            'post_title_pattern' => 'required_if:mapping_type,title_pattern|nullable|string|max:255',
+            'organizational_unit_id' => 'required_if:mapping_type,unit|nullable|exists:organizational_units,id',
+            'assessment_post_id' => 'required|exists:assessment_posts,id',
+            'description' => 'nullable|string|max:500',
+        ]);
+
+        // ✅ بررسی تکراری بودن با منطق دقیق‌تر
+        $existingMapping = AssessmentPostMapping::where('mapping_type', $validated['mapping_type'])
+            ->where(function ($q) use ($validated) {
+                if ($validated['mapping_type'] === 'title_pattern') {
+                    $q->where('post_title_pattern', $validated['post_title_pattern']);
+                } else {
+                    $q->where('organizational_unit_id', $validated['organizational_unit_id']);
+                }
+            })
+            ->first();
+
+        // ✅ اگر نگاشت قبلی وجود دارد، آن را به‌روزرسانی کن
+        if ($existingMapping) {
+            $existingMapping->update([
+                'assessment_post_id' => $validated['assessment_post_id'],
+                'description' => $validated['description'] ?? $existingMapping->description,
+                'is_active' => true,
+            ]);
+
+            return response()->json([
+                'message' => 'نگاشت با موفقیت به‌روزرسانی شد',
+                'mapping' => $existingMapping->fresh()->load(['assessmentPost', 'unit']),
+                'updated' => true,
+            ]);
+        }
+
+        // ✅ ایجاد نگاشت جدید
+        $mapping = AssessmentPostMapping::create([
+            ...$validated,
+            'created_by' => $request->user()->id,
+        ]);
+
+        return response()->json([
+            'message' => 'نگاشت با موفقیت ایجاد شد',
+            'mapping' => $mapping->load(['assessmentPost', 'unit']),
+            'updated' => false,
+        ], 201);
+    }
+
+
+    public function destroy(int $id): JsonResponse
+    {
+        $mapping = AssessmentPostMapping::findOrFail($id);
+        $mapping->delete();
+
+        return response()->json(['message' => 'نگاشت حذف شد']);
+    }
+
+    public function toggle(int $id): JsonResponse
+    {
+        $mapping = AssessmentPostMapping::findOrFail($id);
+        $mapping->update(['is_active' => !$mapping->is_active]);
+
+        return response()->json([
+            'message' => $mapping->is_active ? 'نگاشت فعال شد' : 'نگاشت غیرفعال شد',
+            'is_active' => $mapping->is_active,
+        ]);
+    }
+
+
+    public function noEvaluator(Request $request): JsonResponse
+    {
+        $validated = $request->validate(['cycle_id' => 'required|integer|exists:assessment_cycles,id']);
+        $startTime = microtime(true);
+        $plan = $this->assignments->plan((int) $validated['cycle_id']);
+        $positions = collect($plan['rows'])->where('status', 'no_evaluator')->values();
+
+        return response()->json([
+            'positions' => $positions,
+            'summary' => [
+                'total' => $positions->count(),
+                'execution_time_ms' => round((microtime(true) - $startTime) * 1000, 2),
+            ],
+        ]);
+    }
+
     public function assignEvaluator(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -216,7 +432,7 @@ class AssessmentMappingController extends Controller
     }
 
 
-}
+}*/
 
 
 

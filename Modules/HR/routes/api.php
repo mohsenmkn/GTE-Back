@@ -159,6 +159,8 @@ Route::middleware(['auth:sanctum', 'user.can_login'])->prefix('v1/hr')->name('hr
 
     Route::get('/users/search', [UserController::class, 'search'])->middleware('permission:hr.manage');
 
+    Route::post('/users', [UserController::class, 'store'])->middleware('permission:hr.manage');
+
 // ✅ حذف واحد
     Route::delete('/org-structure/{unit}', [OrgStructureController::class, 'destroy'])
         ->middleware('permission:hr.manage')
