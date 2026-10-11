@@ -1,0 +1,1010 @@
+diff --git a/Modules/HR/App/Http/Controllers/OrganizationalUnitController.php b/Modules/HR/App/Http/Controllers/OrganizationalUnitController.php
+index 487b852..a509715 100644
+--- a/Modules/HR/App/Http/Controllers/OrganizationalUnitController.php
++++ b/Modules/HR/App/Http/Controllers/OrganizationalUnitController.php
+@@ -4,157 +4,37 @@ namespace Modules\HR\App\Http\Controllers;
+ 
+ use Illuminate\Http\JsonResponse;
+ use Illuminate\Http\Request;
+-use Illuminate\Support\Facades\Log;
+ use Modules\HR\App\Models\OrganizationalUnit;
+ use Modules\HR\App\Services\OrganizationalUnitService;
++use RuntimeException;
+ 
+ class OrganizationalUnitController
+ {
+-    public function __construct(
+-        private OrganizationalUnitService $service
+-    ) {
++    public function __construct(private OrganizationalUnitService $service)
++    {
+     }
+ 
+-    public function move(
+-        Request $request,
+-        OrganizationalUnit $organizationalUnit
+-    ): JsonResponse {
+-
++    public function move(Request $request, OrganizationalUnit $organizationalUnit): JsonResponse
++    {
+         $validated = $request->validate([
+-            'parent_id' => [
+-                'nullable',
+-                'integer',
+-                'exists:organizational_units,id',
+-            ],
+-            'sort_order' => [
+-                'nullable',
+-                'integer',
+-                'min:0',
+-            ],
++            'parent_id' => 'nullable|integer|exists:organizational_units,id',
++            'sort_order' => 'nullable|integer|min:0',
+         ]);
+ 
+-        $newParentId = $validated['parent_id'] ?? null;
+-
+-        // جلوگیری از قرار گرفتن واحد زیر خودش
+-        if ($newParentId === $organizationalUnit->id) {
+-            return response()->json([
+-                'success' => false,
+-                'message' => 'یک واحد نمی‌تواند زیرمجموعه خودش قرار بگیرد.',
+-            ], 422);
+-        }
+-
+-        // جلوگیری از ایجاد چرخه
+-        if (
+-            $newParentId &&
+-            $this->wouldCreateCycle(
++        try {
++            $unit = $this->service->move(
+                 $organizationalUnit,
+-                (int) $newParentId
+-            )
+-        ) {
+-            return response()->json([
+-                'success' => false,
+-                'message' => 'این جابه‌جایی باعث ایجاد حلقه در ساختار سازمانی می‌شود.',
+-            ], 422);
++                isset($validated['parent_id']) ? (int) $validated['parent_id'] : null,
++                $validated['sort_order'] ?? null
++            );
++        } catch (RuntimeException $exception) {
++            return response()->json(['success' => false, 'message' => $exception->getMessage()], 422);
+         }
+ 
+-        // تغییر والد
+-        $organizationalUnit->parent_id = $newParentId;
+-        $organizationalUnit->sort_order =
+-            $validated['sort_order'] ?? $organizationalUnit->sort_order;
+-
+-        $organizationalUnit->save();
+-
+-        // بازسازی مسیر خود واحد
+-        $this->recalculateUnit($organizationalUnit);
+-
+-        // بازسازی مسیر تمام فرزندان
+-        $this->recalculateDescendants($organizationalUnit);
+-
+         return response()->json([
+             'success' => true,
+             'message' => 'ساختار واحد سازمانی با موفقیت تغییر کرد.',
+-            'data' => $organizationalUnit->fresh(),
++            'data' => $unit,
+         ]);
+     }
+-
+-    private function wouldCreateCycle(
+-        OrganizationalUnit $unit,
+-        int $newParentId
+-    ): bool {
+-
+-        if ($unit->id === $newParentId) {
+-            return true;
+-        }
+-
+-        $current = OrganizationalUnit::find($newParentId);
+-
+-        while ($current) {
+-
+-            if ($current->id === $unit->id) {
+-                return true;
+-            }
+-
+-            $current = $current->parent_id
+-                ? OrganizationalUnit::find($current->parent_id)
+-                : null;
+-        }
+-
+-        return false;
+-    }
+-
+-    private function recalculateUnit(
+-        OrganizationalUnit $unit
+-    ): void {
+-
+-        if ($unit->parent_id) {
+-
+-            $parent = OrganizationalUnit::findOrFail(
+-                $unit->parent_id
+-            );
+-
+-            $unit->level = $parent->level + 1;
+-
+-            $unit->path =
+-                rtrim($parent->path, '/') .
+-                '/' .
+-                $unit->id .
+-                '/';
+-
+-        } else {
+-
+-            $unit->level = 1;
+-            $unit->path = '/' . $unit->id . '/';
+-        }
+-
+-        $unit->save();
+-    }
+-
+-    private function recalculateDescendants(
+-        OrganizationalUnit $unit
+-    ): void {
+-
+-        $children = OrganizationalUnit::where(
+-            'parent_id',
+-            $unit->id
+-        )
+-            ->orderBy('sort_order')
+-            ->orderBy('id')
+-            ->get();
+-
+-        foreach ($children as $child) {
+-
+-            $child->level = $unit->level + 1;
+-
+-            $child->path =
+-                rtrim($unit->path, '/') .
+-                '/' .
+-                $child->id .
+-                '/';
+-
+-            $child->save();
+-
+-            $this->recalculateDescendants($child);
+-        }
+-    }
+-
+ }
+diff --git a/Modules/HR/App/Models/OrganizationalPosition.php b/Modules/HR/App/Models/OrganizationalPosition.php
+index 80e5cbe..10c2a3a 100644
+--- a/Modules/HR/App/Models/OrganizationalPosition.php
++++ b/Modules/HR/App/Models/OrganizationalPosition.php
+@@ -11,6 +11,8 @@ class OrganizationalPosition extends Model
+ {
+     protected $fillable = [
+         'organizational_unit_id',
++        'source_organizational_unit_id',
++        'is_structure_overridden',
+         'parent_id',
+ 
+         'gt_post_ref',
+@@ -29,6 +31,7 @@ class OrganizationalPosition extends Model
+     ];
+ 
+     protected $casts = [
++        'is_structure_overridden' => 'boolean',
+         'is_custom' => 'boolean',
+         'is_active' => 'boolean',
+         'synced_at' => 'datetime',
+diff --git a/Modules/HR/App/Services/GtarabarSyncService.php b/Modules/HR/App/Services/GtarabarSyncService.php
+index 821ccd1..aff6bc2 100644
+--- a/Modules/HR/App/Services/GtarabarSyncService.php
++++ b/Modules/HR/App/Services/GtarabarSyncService.php
+@@ -67,76 +67,58 @@ class GtarabarSyncService
+ 
+             if (!$employee) return null;
+ 
+-            // اگر تغییری نکرده، فقط synced_at را به‌روز کن
+-            $existing = EmployeePosition::where('user_id', $user->id)->first();
+-
+-            if ($existing && !$this->hasPositionChanged($existing, $statute)) {
+-
++            return DB::transaction(function () use ($user, $employee, $statute) {
++                // sync واحد سازمانی از DepartmentRef
+                 $unit = null;
+-
+                 if ($statute?->DepartmentRef) {
+                     $unit = $this->syncDepartment($statute->DepartmentRef);
+                 }
+-
++    
+                 $organizationalPosition = null;
+-
++    
+                 if ($unit && $statute?->PostRef) {
+                     $organizationalPosition = $this->syncOrganizationalPosition(
+-                        $unit,
+-                        $statute
++                        unit: $unit,
++                        statute: $statute
+                     );
+                 }
+-
+-                $existing->update([
+-                    'organizational_unit_id'     => $unit?->id,
+-                    'organizational_position_id' => $organizationalPosition?->id,
+-                    'synced_at'                  => now(),
+-                    'sync_failed'                => false,
+-                ]);
+-
+-                return $existing;
+-            }
+-
+-            // sync واحد سازمانی از DepartmentRef
+-            $unit = null;
+-            if ($statute?->DepartmentRef) {
+-                $unit = $this->syncDepartment($statute->DepartmentRef);
+-            }
+-
+-            $organizationalPosition = null;
+-
+-            if ($unit && $statute?->PostRef) {
+-                $organizationalPosition = $this->syncOrganizationalPosition(
+-                    unit: $unit,
+-                    statute: $statute
++    
++                if ($statute?->DepartmentRef && !$unit) {
++                    throw new \RuntimeException('واحد سازمانی از منبع همگام‌سازی دریافت نشد.');
++                }
++                if ($unit && $statute?->PostRef && !$organizationalPosition) {
++                    throw new \RuntimeException('سمت سازمانی از منبع همگام‌سازی دریافت نشد.');
++                }
++                if ($organizationalPosition) {
++                    $unit = $organizationalPosition->unit;
++                }
++    
++                return EmployeePosition::updateOrCreate(
++                    ['user_id' => $user->id],
++                    [
++                        'personnel_code'                  => $user->personnel_code,
++                        'gt_employee_id'                  => $employee->EmployeeID,
++                        'gt_statute_id'                   => $statute?->EmployeeStatuteID,
++    
++                        'gt_post_ref'                     => $statute?->PostRef,
++                        'post_code'                       => $statute?->PostCode,
++                        'post_title'                      => $statute?->PostTitle,
++    
++                        'gt_job_ref'                      => $statute?->JobRef,
++                        'job_code'                        => $statute?->JobCode,
++                        'job_title'                       => $statute?->JobTitle,
++    
++                        'organizational_unit_id'          => $unit?->id,
++                        'organizational_position_id'      => $organizationalPosition?->id,
++    
++                        'gt_organizational_structure_ref' => $statute?->OrganizationalStructureRef,
++                        'gt_department_ref'               => $statute?->DepartmentRef,
++    
++                        'synced_at'                       => now(),
++                        'sync_failed'                     => false,
++                    ]
+                 );
+-            }
+-
+-            return EmployeePosition::updateOrCreate(
+-                ['user_id' => $user->id],
+-                [
+-                    'personnel_code'                  => $user->personnel_code,
+-                    'gt_employee_id'                  => $employee->EmployeeID,
+-                    'gt_statute_id'                   => $statute?->EmployeeStatuteID,
+-
+-                    'gt_post_ref'                     => $statute?->PostRef,
+-                    'post_code'                       => $statute?->PostCode,
+-                    'post_title'                      => $statute?->PostTitle,
+-
+-                    'gt_job_ref'                      => $statute?->JobRef,
+-                    'job_code'                        => $statute?->JobCode,
+-                    'job_title'                       => $statute?->JobTitle,
+-
+-                    'organizational_unit_id'          => $unit?->id,
+-                    'organizational_position_id'      => $organizationalPosition?->id,
+-
+-                    'gt_organizational_structure_ref' => $statute?->OrganizationalStructureRef,
+-                    'gt_department_ref'               => $statute?->DepartmentRef,
+-
+-                    'synced_at'                       => now(),
+-                    'sync_failed'                     => false,
+-                ]
+-            );
++            });
+         } catch (\Exception $e) {
+             Log::error("syncUserPosition({$user->id}) failed: {$e->getMessage()}");
+             EmployeePosition::where('user_id', $user->id)
+@@ -155,12 +137,12 @@ class GtarabarSyncService
+ 
+         try {
+ 
+-            $position = OrganizationalPosition::where(
+-                'organizational_unit_id',
+-                $unit->id
+-            )
++            $position = OrganizationalPosition::where('source_organizational_unit_id', $unit->id)
+                 ->where('gt_post_ref', $statute->PostRef)
+-                ->first();
++                ->where('is_structure_overridden', true)
++                ->first()
++                ?? OrganizationalPosition::where('organizational_unit_id', $unit->id)
++                    ->where('gt_post_ref', $statute->PostRef)->first();
+ 
+             // اگر قبلاً توسط ساختار سازمانی ایجاد شده
+             if ($position) {
+@@ -181,6 +163,7 @@ class GtarabarSyncService
+             // سمت جدید
+             return OrganizationalPosition::create([
+                 'organizational_unit_id' => $unit->id,
++                'source_organizational_unit_id' => $unit->id,
+ 
+                 'gt_post_ref'  => $statute->PostRef,
+                 'post_code'   => $statute->PostCode,
+diff --git a/Modules/HR/App/Services/OrgChartService.php b/Modules/HR/App/Services/OrgChartService.php
+index 2be499b..d99faa2 100644
+--- a/Modules/HR/App/Services/OrgChartService.php
++++ b/Modules/HR/App/Services/OrgChartService.php
+@@ -18,126 +18,7 @@ class OrgChartService
+      */
+     public function buildTree(): array
+     {
+-        $units = OrganizationalUnit::query()
+-            ->with([
+-                'positions' => function ($q) {
+-                    $q->orderBy('sort_order')
+-                        ->with([
+-                            'employees.user:id,name,mobile',
+-                            'children',
+-                        ]);
+-                },
+-            ])
+-            ->where('is_active', true)
+-            ->orderBy('level')
+-            ->orderBy('sort_order')
+-            ->orderBy('title')
+-            ->get();
+-
+-        $tree = [];
+-
+-        foreach ($units as $unit) {
+-
+-            $node = [
+-                'key' => 'unit-' . $unit->id,
+-
+-                'data' => [
+-                    'id'             => $unit->id,
+-                    'title'          => $unit->title,
+-                    'code'           => $unit->code,
+-                    'level'          => $unit->level,
+-                    'employee_count' => $unit->employees()->count(),
+-                    'type'           => 'unit',
+-                ],
+-
+-                'children' => [],
+-            ];
+-
+-            // سمت‌های این واحد
+-            $positions = $unit->positions
+-                ->whereNull('parent_id')
+-                ->sortBy('sort_order');
+-
+-            foreach ($positions as $position) {
+-                $node['children'][] = $this->buildPositionNode(
+-                    $position
+-                );
+-            }
+-
+-            $tree[] = $node;
+-        }
+-
+-        return $tree;
+-    }
+-
+-    /**
+-     * ساخت Node مربوط به سمت
+-     */
+-    private function buildPositionNode(
+-        OrganizationalPosition $position
+-    ): array {
+-
+-        $node = [
+-            'key' => 'position-' . $position->id,
+-
+-            'data' => [
+-                'id'             => $position->id,
+-                'type'           => 'position',
+-
+-                'post_title'     => $position->post_title,
+-                'post_code'      => $position->post_code,
+-
+-                'job_title'      => $position->job_title,
+-                'job_code'       => $position->job_code,
+-
+-                'is_custom'      => $position->is_custom,
+-                'is_active'      => $position->is_active,
+-
+-                'employee_count' => $position->employees->count(),
+-            ],
+-
+-            'children' => [],
+-        ];
+-
+-        // ابتدا سمت‌های زیرمجموعه
+-        foreach (
+-            $position->children
+-                ->where('is_active', true)
+-                ->sortBy('sort_order')
+-            as $child
+-        ) {
+-
+-            $node['children'][] = $this->buildPositionNode(
+-                $child->load([
+-                    'employees.user:id,name,mobile',
+-                    'children',
+-                ])
+-            );
+-        }
+-
+-        // سپس کارکنان این سمت
+-        foreach ($position->employees as $employee) {
+-
+-            $node['children'][] = [
+-                'key' => 'emp-' . $employee->id,
+-
+-           warning: in the working copy of '.hr-work/App/Services/OrganizationHierarchyService.php', LF will be replaced by CRLF the next time Git touches it
+     'data' => [
+-                    'type'           => 'employee',
+-                    'user_id'        => $employee->user_id,
+-
+-                    'name'           => $employee->user?->name ?? '—',
+-
+-                    'personnel_code' => $employee->personnel_code,
+-
+-                    'post_title'     => $employee->post_title,
+-                    'job_title'      => $employee->job_title,
+-
+-                    'mobile'         => $employee->user?->mobile,
+-                ],
+-            ];
+-        }
+-
+-        return $node;
++        return app(OrganizationHierarchyService::class)->buildTree(true);
+     }
+ 
+     /**
+diff --git a/Modules/HR/App/Services/OrganizationHierarchyService.php b/Modules/HR/App/Services/OrganizationHierarchyService.php
+new file mode 100644
+index 0000000..fc613af
+--- /dev/null
++++ b/Modules/HR/App/Services/OrganizationHierarchyService.php
+@@ -0,0 +1,186 @@
++<?php
++
++namespace Modules\HR\App\Services;
++
++use Illuminate\Support\Collection;
++use Modules\HR\App\Models\EmployeePosition;
++use Modules\HR\App\Models\OrganizationalPosition;
++use Modules\HR\App\Models\OrganizationalUnit;
++use RuntimeException;
++
++class OrganizationHierarchyService
++{
++    public function snapshot(): array
++    {
++        $units = OrganizationalUnit::where('is_active', true)
++            ->orderBy('sort_order')->orderBy('id')->get()->keyBy('id');
++        $positions = OrganizationalPosition::where('is_active', true)
++            ->whereIn('organizational_unit_id', $units->keys())
++            ->orderBy('sort_order')->orderBy('id')->get()->keyBy('id');
++        $employees = EmployeePosition::with(['user', 'unit', 'organizationalPosition'])
++            ->whereIn('organizational_unit_id', $units->keys())
++            ->whereHas('user', fn($query) => $query->where('is_active', true))
++            ->orderBy('id')->get();
++
++        $this->assertAcyclic($units);
++        $this->assertAcyclic($positions);
++
++        return compact('units', 'positions', 'employees');
++    }
++
++    public function managerCandidates(EmployeePosition $employee, array $snapshot): Collection
++    {
++        $positions = $snapshot['positions'];
++        $position = $positions->get($employee->organizational_position_id);
++        if (!$position) {
++            return collect();
++        }
++
++        $candidates = collect();
++        $parentId = $position->parent_id;
++        $visited = [(int) $position->id => true];
++        while ($parentId && $parent = $positions->get($parentId)) {
++            if (isset($visited[(int) $parent->id])) {
++                throw new RuntimeException('حلقه در ساختار سمت‌های سازمانی وجود دارد.');
++            }
++            $visited[(int) $parent->id] = true;
++            $candidates = $candidates->merge($this->occupants($parent->id, $employee, $snapshot));
++            $parentId = $parent->parent_id;
++        }
++
++        $units = $snapshot['units'];
++        $unitId = $units->get($position->organizational_unit_id)?->parent_id;
++        $visitedUnits = [];
++        while ($unitId && $unit = $units->get($unitId)) {
++            if (isset($visitedUnits[(int) $unit->id])) {
++                throw new RuntimeException('حلقه در ساختار واحدهای سازمانی وجود دارد.');
++            }
++            $visitedUnits[(int) $unit->id] = true;
++            foreach ($positions->where('organizational_unit_id', $unit->id)->whereNull('parent_id') as $root) {
++                $candidates = $candidates->merge($this->occupants($root->id, $employee, $snapshot));
++            }
++            $unitId = $unit->parent_id;
++        }
++
++        return $candidates->unique('user_id')->values();
++    }
++
++    public function legacyCandidates(EmployeePosition $employee, array $snapshot): Collection
++    {
++        if ($employee->organizational_position_id) {
++            return collect();
++        }
++
++        $candidates = collect();
++        $unitId = $employee->organizational_unit_id;
++        $visited = [];
++        while ($unitId && $unit = $snapshot['units']->get($unitId)) {
++            if (isset($visited[(int) $unit->id])) {
++                throw new RuntimeException('حلقه در ساختار واحدهای سازمانی وجود دارد.');
++            }
++            $visited[(int) $unit->id] = true;
++            $candidates = $candidates->merge($snapshot['employees']
++                ->where('organizational_unit_id', $unit->id)
++                ->where('user_id', '!=', $employee->user_id)
++                ->filter(fn($candidate) => !$candidate->organizational_position_id
++                    || $snapshot['positions']->has($candidate->organizational_position_id)));
++            $unitId = $unit->parent_id;
++        }
++
++        return $candidates->unique('user_id')->values();
++    }
++
++    public function buildTree(bool $includeEmployeeNodes = false): array
++    {
++        $snapshot = $this->snapshot();
++        $units = $snapshot['units'];
++        $unitNodes = [];
++        foreach ($units as $unit) {
++            $unitNodes[$unit->id] = [
++                'key' => 'unit-' . $unit->id,
++                'data' => [
++                    'id' => $unit->id, 'type' => 'unit', 'title' => $unit->title,
++                    'code' => $unit->code, 'level' => $unit->level, 'parent_id' => $unit->parent_id,
++                    'is_custom' => $unit->is_custom, 'is_active' => $unit->is_active,
++                    'sort_order' => $unit->sort_order,
++                    'employee_count' => $snapshot['employees']->where('organizational_unit_id', $unit->id)->count(),
++                ],
++                'children' => [],
++            ];
++            $positions = $snapshot['positions']->where('organizational_unit_id', $unit->id);
++            foreach ($positions as $position) {
++                if (!$position->parent_id || !$positions->has($position->parent_id)) {
++                    $unitNodes[$unit->id]['children'][] = $this->positionNode($position, $positions, $snapshot, $includeEmployeeNodes);
++                }
++            }
++        }
++
++        $tree = [];
++        foreach ($units as $unit) {
++            if ($unit->parent_id && isset($unitNodes[$unit->parent_id])) {
++                $unitNodes[$unit->parent_id]['children'][] = &$unitNodes[$unit->id];
++            } else {
++                $tree[] = &$unitNodes[$unit->id];
++            }
++        }
++
++        return $tree;
++    }
++
++    private function occupants(int $positionId, EmployeePosition $employee, array $snapshot): Collection
++    {
++        return $snapshot['employees']->where('organizational_position_id', $positionId)
++            ->where('user_id', '!=', $employee->user_id)->values();
++    }
++
++    private function positionNode(OrganizationalPosition $position, Collection $positions, array $snapshot, bool $includeEmployees): array
++    {
++        $employees = $snapshot['employees']->where('organizational_position_id', $position->id)->map(fn($employee) => [
++            'id' => $employee->id, 'user_id' => $employee->user_id,
++            'name' => $employee->user?->name, 'personnel_code' => $employee->personnel_code,
++            'mobile' => $employee->user?->mobile, 'post_title' => $employee->post_title,
++            'job_title' => $employee->job_title,
++        ])->values()->all();
++        $node = [
++            'key' => 'position-' . $position->id,
++            'data' => [
++                'id' => $position->id, 'type' => 'position', 'parent_id' => $position->parent_id,
++                'post_title' => $position->post_title, 'post_code' => $position->post_code,
++                'job_title' => $position->job_title, 'job_code' => $position->job_code,
++                'unit_id' => $position->organizational_unit_id,
++                'unit_title' => $snapshot['units']->get($position->organizational_unit_id)?->title,
++                'is_custom' => $position->is_custom, 'is_active' => $position->is_active,
++                'sort_order' => $position->sort_order,
++                'employee_count' => count($employees), 'employees' => $employees,
++            ],
++            'children' => [],
++        ];
++        foreach ($positions->where('parent_id', $position->id) as $child) {
++            $node['children'][] = $this->positionNode($child, $positions, $snapshot, $includeEmployees);
++        }
++        if ($includeEmployees) {
++            foreach ($employees as $employee) {
++                $node['children'][] = ['key' => 'emp-' . $employee['id'], 'data' => ['type' => 'employee'] + $employee];
++            }
++        }
++
++        return $node;
++    }
++
++    private function assertAcyclic(Collection $nodes): void
++    {
++        $checked = [];
++        foreach ($nodes as $node) {
++            $visited = [];
++            $current = $node;
++            while ($current && !isset($checked[(int) $current->id])) {
++                if (isset($visited[(int) $current->id])) {
++                    throw new RuntimeException('حلقه در چارت سازمانی وجود دارد.');
++                }
++                $visited[(int) $current->id] = true;
++                $current = $nodes->get($current->parent_id);
++            }
++            $checked += $visited;
++        }
++    }
++}
+diff --git a/Modules/HR/App/Services/OrganizationalPositionService.php b/Modules/HR/App/Services/OrganizationalPositionService.php
+index 5bb01a0..c0c38f8 100644
+--- a/Modules/HR/App/Services/OrganizationalPositionService.php
++++ b/Modules/HR/App/Services/OrganizationalPositionService.php
+@@ -41,183 +41,7 @@ class OrganizationalPositionService
+      */
+     public function tree(): array
+     {
+-        $units = OrganizationalUnit::query()
+-            ->where('is_active', true)
+-            ->with([
+-                'positions' => function ($query) {
+-                    $query
+-                        ->where('is_active', true)
+-                        ->with([
+-                            'employees.user:id,name,mobile',
+-                        ])
+-                        ->withCount('employees')
+-                        ->orderBy('sort_order')
+-                        ->orderBy('post_title');
+-                },
+-            ])
+-            ->orderBy('level')
+-            ->orderBy('sort_order')
+-            ->orderBy('title')
+-            ->get();
+-
+-        /*
+-        |--------------------------------------------------------------------------
+-        | 1. ساخت Node برای همه واحدها
+-        |--------------------------------------------------------------------------
+-        */
+-
+-        $unitMap = [];
+-
+-        foreach ($units as $unit) {
+-
+-            $unitMap[$unit->id] = [
+-                'key' => 'unit-' . $unit->id,
+-
+-                'data' => [
+-                    'id'       => $unit->id,
+-                    'type'     => 'unit',
+-                    'title'    => $unit->title,
+-                    'code'     => $unit->code,
+-                    'level'    => $unit->level,
+-                    'parent_id'=> $unit->parent_id,
+-                    'is_custom'=> $unit->is_custom,
+-                    'is_active'=> $unit->is_active,
+-                    'sort_order' => $unit->sort_order,
+-                ],
+-
+-                'children' => [],
+-            ];
+-        }
+-
+-
+-        /*
+-        |--------------------------------------------------------------------------
+-        | 2. اضافه کردن سمت‌ها به واحد مربوطه
+-        |--------------------------------------------------------------------------
+-        */
+-
+-        foreach ($units as $unit) {
+-
+-            if (!isset($unitMap[$unit->id])) {
+-                continue;
+-            }
+-
+-            $positions = $unit->positions;
+-
+-            $positionMap = [];
+-
+-            foreach ($positions as $position) {
+-
+-                $positionMap[$position->id] = [
+-                    'key' => 'position-' . $position->id,
+-
+-                    'data' => [
+-                        'id' => $position->id,
+-                        'type' => 'position',
+-
+-                        'post_title' => $position->post_title,
+-                        'post_code' => $position->post_code,
+-
+-                        'job_title' => $position->job_title,
+-                        'job_code' => $position->job_code,
+-
+-                        'parent_id' => $position->parent_id,
+-
+-                        'unit_id' => $unit->id,
+-                        'unit_title' => $unit->title,
+-
+-                        'employee_count' => $position->employees_count,
+-
+-                        'employees' => $position->employees
+-                            ->map(function ($employee) {
+-                                return [
+-                                    'id' => $employee->id,
+-                                    'user_id' => $employee->user_id,
+-
+-                                    'name' =>
+-                                        $employee->user?->name
+-                                        ?? 'بدون نام',
+-
+-                                    'personnel_code' =>
+-                                        $employee->personnel_code,
+-                                ];
+-                            })
+-                            ->values()
+-                            ->toArray(),
+-
+-                        'is_custom' => $position->is_custom,
+-                        'is_active' => $position->is_active,
+-                        'sort_order' => $position->sort_order,
+-                    ],
+-
+-                    'children' => [],
+-                ];
+-            }
+-
+-
+-            /*
+-            |--------------------------------------------------------------------------
+-            | ساخت درخت سمت‌ها
+-            |--------------------------------------------------------------------------
+-            */
+-
+-            foreach ($positions as $position) {
+-
+-                $node = &$positionMap[$position->id];
+-
+-                if (
+-                    $position->parent_id &&
+-                    isset($positionMap[$position->parent_id])
+-                ) {
+-
+-                    $positionMap[$position->parent_id]['children'][] = &$node;
+-
+-                } else {
+-
+-                    $unitMap[$unit->id]['children'][] = &$node;
+-                }
+-            }
+-
+-            unset($node);
+-        }
+-
+-
+-        /*
+-        |--------------------------------------------------------------------------
+-        | 3. ساخت درخت واحدهای سازمانی
+-        |--------------------------------------------------------------------------
+-        */
+-
+-        $result = [];
+-
+-        foreach ($units as $unit) {
+-
+-            $node = &$unitMap[$unit->id];
+-
+-            /*
+-            | اگر والد دارد، زیر والد قرار بگیرد
+-            */
+-
+-            if (
+-                $unit->parent_id &&
+-                isset($unitMap[$unit->parent_id])
+-            ) {
+-
+-                $unitMap[$unit->parent_id]['children'][] = &$node;
+-
+-            } else {
+-
+-                /*
+-                | واحد بدون والد = ریشه
+-                */
+-
+-                $result[] = &$node;
+-            }
+-        }
+-
+-        unset($node);
+-
+-        return $result;
++        return app(OrganizationHierarchyService::class)->buildTree();
+     }
+ 
+     /**
+@@ -248,6 +72,8 @@ class OrganizationalPositionService
+ 
+             return OrganizationalPosition::create([
+                 'organizational_unit_id' => $unit->id,
++                'source_organizational_unit_id' => isset($data['gt_post_ref']) ? $unit->id : null,
++                'is_structure_overridden' => true,
+                 'parent_id' => $parentId,
+ 
+                 'gt_post_ref' => $data['gt_post_ref'] ?? null,
+@@ -301,6 +127,7 @@ class OrganizationalPositionService
+                 }
+ 
+                 $position->parent_id = $parentId;
++                $position->is_structure_overridden = true;
+             }
+ 
+             if (array_key_exists('post_title', $data)) {
+@@ -332,6 +159,10 @@ class OrganizationalPositionService
+             }
+ 
+             $position->save();
++            $employeeFields = array_intersect_key($data, array_flip(['post_title', 'post_code', 'job_title', 'job_code']));
++            if ($employeeFields) {
++                $position->employees()->update($employeeFields);
++            }
+ 
+             return $position->fresh([
+                 'unit',
+@@ -444,7 +275,20 @@ class OrganizationalPositionService
+             $position->parent_id = $parentId;
+             $position->sort_order = $sortOrder;
+ 
++            $positionIds = $this->subtreeIds($position);
++            foreach (OrganizationalPosition::whereIn('id', $positionIds)->lockForUpdate()->get() as $member) {
++                if ($member->gt_post_ref && !$member->source_organizational_unit_id) {
++                    $member->source_organizational_unit_id = $member->organizational_unit_id;
++                }
++                $member->organizational_unit_id = $targetUnitId;
++                $member->is_structure_overridden = true;
++                $member->save();
++            }
++
++            $position->is_structure_overridden = true;
+             $position->save();
++            \Modules\HR\App\Models\EmployeePosition::whereIn('organizational_position_id', $positionIds)
++                ->update(['organizational_unit_id' => $targetUnitId]);
+ 
+ 
+             /*
+@@ -538,8 +382,13 @@ class OrganizationalPositionService
+         if ($position) {
+ 
+             $current = $parent;
++            $visited = [];
+ 
+             while ($current) {
++                if (isset($visited[(int) $current->id])) {
++                    throw new RuntimeException('حلقه در ساختار سمت‌ها وجود دارد.');
++                }
++                $visited[(int) $current->id] = true;
+ 
+                 if ($current->id === $position->id) {
+                     throw new RuntimeException(
+@@ -599,4 +448,20 @@ class OrganizationalPositionService
+             }
+         }
+     }
++    private function subtreeIds(OrganizationalPosition $position): array
++    {
++        $ids = [(int) $position->id];
++        $pending = $ids;
++        while ($pending) {
++            $children = OrganizationalPosition::whereIn('parent_id', $pending)->pluck('id')->map(fn($id) => (int) $id)->all();
++            if (array_intersect($ids, $children)) {
++                throw new RuntimeException('حلقه در ساختار سمت‌ها وجود دارد.');
++            }
++            $ids = array_merge($ids, $children);
++            $pending = $children;
++        }
++
++        return $ids;
++    }
++
+ }
+diff --git a/Modules/HR/Database/Migrations/2026_10_04_160000_preserve_local_organizational_position_structure.php b/Modules/HR/Database/Migrations/2026_10_04_160000_preserve_local_organizational_position_structure.php
+new file mode 100644
+index 0000000..5e365c5
+--- /dev/null
++++ b/Modules/HR/Database/Migrations/2026_10_04_160000_preserve_local_organizational_position_structure.php
+@@ -0,0 +1,28 @@
++<?php
++
++use Illuminate\Database\Migrations\Migration;
++use Illuminate\Database\Schema\Blueprint;
++use Illuminate\Support\Facades\DB;
++use Illuminate\Support\Facades\Schema;
++
++return new class extends Migration
++{
++    public function up(): void
++    {
++        Schema::table('organizational_positions', function (Blueprint $table) {
++            $table->foreignId('source_organizational_unit_id')->nullable()
++                ->constrained('organizational_units')->nullOnDelete();
++            $table->boolean('is_structure_overridden')->default(false);
++        });
++        DB::table('organizational_positions')->whereNotNull('gt_post_ref')
++            ->update(['source_organizational_unit_id' => DB::raw('organizational_unit_id')]);
++    }
++
++    public function down(): void
++    {
++        Schema::table('organizational_positions', function (Blueprint $table) {
++            $table->dropForeign(['source_organizational_unit_id']);
++            $table->dropColumn(['source_organizational_unit_id', 'is_structure_overridden']);
++        });
++    }
++};
+diff --git a/Modules/HR/routes/api.php b/Modules/HR/routes/api.php
+index ce545bd..abb9aaa 100644
+--- a/Modules/HR/routes/api.php
++++ b/Modules/HR/routes/api.php
+@@ -165,22 +165,22 @@ Route::middleware(['auth:sanctum', 'user.can_login'])->prefix('v1/hr')->name('hr
+             Route::post(
+                 '/organizational-units/{organizationalUnit}/move',
+                 [OrganizationalUnitController::class, 'move']
+-            );
++            )->middleware('permission:hr.manage');
+             Route::get(
+                 '/organizational-positions/tree',
+                 [OrganizationalPositionController::class, 'tree']
+-            );
++            )->middleware('permission:hr.view|hr.manage');
+ 
+             Route::post(
+                 '/organizational-positions/{organizationalPosition}/move',
+                 [OrganizationalPositionController::class, 'move']
+-            );
++            )->middleware('permission:hr.manage');
+ 
+ 
+ 
+             Route::apiResource(
+                 'organizational-positions',
+                 OrganizationalPositionController::class
+-            );
++            )->middleware('permission:hr.manage');
+ 
+ });

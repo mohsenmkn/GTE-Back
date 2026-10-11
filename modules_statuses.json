@@ -26,5 +26,6 @@
     "SystemSettings": true,
     "WarehouseGtrabar": true,
     "Finance": true,
-    "PreWarehouse": true
+    "PreWarehouse": true,
+    "TripExpense": true
 }

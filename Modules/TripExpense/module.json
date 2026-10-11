@@ -1,0 +1,11 @@
+{
+    "name": "TripExpense",
+    "alias": "tripexpense",
+    "description": "",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\TripExpense\\App\\Providers\\TripExpenseServiceProvider"
+    ],
+    "files": []
+}

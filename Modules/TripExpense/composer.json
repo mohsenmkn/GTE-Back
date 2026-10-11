@@ -1,0 +1,31 @@
+{
+    "name": "nwidart/tripexpense",
+    "description": "",
+    "authors": [
+        {
+            "name": "Nicolas Widart",
+            "email": "n.widart@gmail.com"
+        }
+    ],
+    "extra": {
+        "laravel": {
+            "providers": [],
+            "aliases": {
+
+            }
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "Modules\\TripExpense\\": "",
+            "Modules\\TripExpense\\App\\": "app/",
+            "Modules\\TripExpense\\Database\\Factories\\": "database/factories/",
+            "Modules\\TripExpense\\Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Modules\\TripExpense\\Tests\\": "tests/"
+        }
+    }
+}

@@ -74,6 +74,25 @@ return [
         'equipment_costs' => ['view', 'export', 'manage'],
 
 
+        'trip_expense' => [
+            'view',                    // مشاهده کلی ماژول
+            'manage',                  // مدیریت کامل (فقط ادمین)
+            'create_trip',             // ثبت سفر جدید
+            'view_trips',              // مشاهده لیست سفرها
+            'create_expense',          // ثبت هزینه
+            'view_expenses',           // مشاهده هزینه‌ها
+            'approve_expense',         // تایید هزینه
+            'reject_expense',          // رد هزینه
+            'manage_trucks',           // مدیریت کامیون‌ها
+            'manage_limits',           // مدیریت سقف هزینه‌ها
+            'manage_categories',       // مدیریت دسته‌بندی‌ها
+            'manage_assignments_trucks',   // ✅ جدید: مدیریت اختصاص راننده به کامیون
+            'view_reports',        // ✅ جدید: مشاهده گزارش‌ها
+            'export_reports',      // ✅ جدید: خروجی گزارش‌ها
+
+        ],
+
+
         // ═══════ ماژول پیش‌انبار ═══════
         'pre_warehouse' => [
             'view',                 // مشاهده لیست و جزئیات خریدها
@@ -147,7 +166,8 @@ return [
             'equipment_costs' => 'گزارش هزینه تجهیزات',
 
             'pre_warehouse' => 'پیش‌انبار',
-
+// اضافه کردن به بخش 'labels.module_names':
+            'trip_expense' => 'هزینه‌های سفر رانندگان',
 
 
         ],
@@ -202,6 +222,20 @@ return [
             'commercial_voucher' => 'ورود حواله بازرگانی',
             'warehouse_receipt' => 'ورود رسید انبار',
             'warehouse_return_schedule' => 'تعیین تاریخ تحویل کالای مرجوعی به بازرگانی',
+
+            // اضافه کردن به بخش 'labels.actions':
+            'create_trip'       => 'ثبت سفر',
+            'view_trips'        => 'مشاهده سفرها',
+            'create_expense'    => 'ثبت هزینه',
+            'view_expenses'     => 'مشاهده هزینه‌ها',
+            'approve_expense'   => 'تایید هزینه',
+            'reject_expense'    => 'رد هزینه',
+            'manage_trucks'     => 'مدیریت کامیون‌ها',
+            'manage_limits'     => 'مدیریت سقف هزینه‌ها',
+            'manage_categories' => 'مدیریت دسته‌بندی‌ها',
+            'manage_assignments_trucks' => 'مدیریت اختصاص راننده به کامیون',
+            'view_reports_trip_expense'   => 'مشاهده گزارش‌ها',
+            'export_reports_trip_expense' => 'خروجی گزارش‌ها',
         ],
     ]
 
