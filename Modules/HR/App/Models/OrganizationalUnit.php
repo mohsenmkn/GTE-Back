@@ -13,6 +13,7 @@ class OrganizationalUnit extends Model
         'code',
         'title',
         'parent_id',
+        'parent_position_id', // ✅ اضافه شده در مرحله ۱
         'path',
         'level',
         'is_active',
@@ -28,7 +29,7 @@ class OrganizationalUnit extends Model
         'is_custom' => 'boolean',
     ];
 
-    // ── سلسله مراتب ──────────────────────────
+    // ── سلسله مراتب واحدها ──────────────────────────
 
     public function parent(): BelongsTo
     {
@@ -44,6 +45,34 @@ class OrganizationalUnit extends Model
     public function directChildren(): HasMany
     {
         return $this->children()->where('is_active', true);
+    }
+
+    // ✅ رابطه جدید: والد از نوع سمت
+    public function parentPosition(): BelongsTo
+    {
+        return $this->belongsTo(OrganizationalPosition::class, 'parent_position_id');
+    }
+
+    /**
+     * ✅ متد کمکی: دریافت والد (چه واحد چه سمت)
+     */
+    public function parentEntity(): Model|null
+    {
+        if ($this->parent_id) {
+            return $this->parent;
+        }
+
+        if ($this->parent_position_id) {
+            return $this->parentPosition;
+        }
+
+        return null;
+    }
+
+    // ✅ رابطه جدید: سمت‌های این واحد
+    public function positions(): HasMany
+    {
+        return $this->hasMany(OrganizationalPosition::class, 'organizational_unit_id');
     }
 
     /** همه زیرمجموعه‌ها (همه سطوح) با استفاده از path */
@@ -87,13 +116,5 @@ class OrganizationalUnit extends Model
     public function employees(): HasMany
     {
         return $this->hasMany(EmployeePosition::class);
-    }
-
-    public function positions(): HasMany
-    {
-        return $this->hasMany(
-            OrganizationalPosition::class,
-            'organizational_unit_id'
-        )->orderBy('sort_order');
     }
 }

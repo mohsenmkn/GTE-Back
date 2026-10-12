@@ -1,6 +1,5 @@
 <?php
 
-
 namespace Modules\HR\App\Services;
 
 use Illuminate\Support\Facades\DB;
@@ -39,7 +38,8 @@ class OrganizationalPositionService
      * Unit
      *   └── Position
      *        ├── Position
-     *        └── Position
+     *        └── Unit (زیر سمت) ✅
+     *             └── Position
      */
     public function tree(): array
     {
@@ -62,19 +62,12 @@ class OrganizationalPositionService
             ->orderBy('title')
             ->get();
 
-        /*
-        |--------------------------------------------------------------------------
-        | 1. ساخت Node برای همه واحدها
-        |--------------------------------------------------------------------------
-        */
+        // ── ۱. ساخت Node برای همه واحدها ────────────────
 
         $unitMap = [];
-
         foreach ($units as $unit) {
-
             $unitMap[$unit->id] = [
                 'key' => 'unit-' . $unit->id,
-
                 'data' => [
                     'id'       => $unit->id,
                     'type'     => 'unit',
@@ -82,141 +75,93 @@ class OrganizationalPositionService
                     'code'     => $unit->code,
                     'level'    => $unit->level,
                     'parent_id'=> $unit->parent_id,
+                    'parent_position_id' => $unit->parent_position_id, // ✅ اضافه شد
                     'is_custom'=> $unit->is_custom,
                     'is_active'=> $unit->is_active,
                     'sort_order' => $unit->sort_order,
                 ],
-
                 'children' => [],
             ];
         }
 
+        // ── ۲. ساخت Node برای همه سمت‌ها ────────────────
+        // ✅ $positionMap بیرون از حلقه units تعریف شده
 
-        /*
-        |--------------------------------------------------------------------------
-        | 2. اضافه کردن سمت‌ها به واحد مربوطه
-        |--------------------------------------------------------------------------
-        */
-
+        $positionMap = [];
         foreach ($units as $unit) {
-
             if (!isset($unitMap[$unit->id])) {
                 continue;
             }
-
             $positions = $unit->positions;
-
-            $positionMap = [];
-
             foreach ($positions as $position) {
-
                 $positionMap[$position->id] = [
                     'key' => 'position-' . $position->id,
-
                     'data' => [
                         'id' => $position->id,
                         'type' => 'position',
-
                         'post_title' => $position->post_title,
                         'post_code' => $position->post_code,
-
                         'job_title' => $position->job_title,
                         'job_code' => $position->job_code,
-
                         'parent_id' => $position->parent_id,
-
-                        'unit_id' => $unit->id,
+                        'unit_id' => $position->organizational_unit_id,
                         'unit_title' => $unit->title,
-
+                        'is_custom' => $position->is_custom,
+                        'is_active' => $position->is_active,
+                        'sort_order' => $position->sort_order,
                         'employee_count' => $position->employees_count,
-
                         'employees' => $position->employees
                             ->map(function ($employee) {
                                 return [
                                     'id' => $employee->id,
                                     'user_id' => $employee->user_id,
-
-                                    'name' =>
-                                        $employee->user?->name
-                                        ?? 'بدون نام',
-
-                                    'personnel_code' =>
-                                        $employee->personnel_code,
+                                    'name' => $employee->user?->name ?? 'بدون نام',
+                                    'personnel_code' => $employee->personnel_code,
                                 ];
                             })
                             ->values()
                             ->toArray(),
-
-                        'is_custom' => $position->is_custom,
-                        'is_active' => $position->is_active,
-                        'sort_order' => $position->sort_order,
                     ],
-
                     'children' => [],
                 ];
             }
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | ساخت درخت سمت‌ها
-            |--------------------------------------------------------------------------
-            */
-
-            foreach ($positions as $position) {
-
-                $node = &$positionMap[$position->id];
-
-                if (
-                    $position->parent_id &&
-                    isset($positionMap[$position->parent_id])
-                ) {
-
-                    $positionMap[$position->parent_id]['children'][] = &$node;
-
-                } else {
-
-                    $unitMap[$unit->id]['children'][] = &$node;
-                }
-            }
-
-            unset($node);
         }
 
+        // ── ۳. ساخت درخت سمت‌ها ─────────────────────────
 
-        /*
-        |--------------------------------------------------------------------------
-        | 3. ساخت درخت واحدهای سازمانی
-        |--------------------------------------------------------------------------
-        */
+        foreach ($positionMap as $positionId => &$positionNode) {
+            $parentId = $positionNode['data']['parent_id'];
+            $unitId = $positionNode['data']['unit_id'];
+
+            if ($parentId && isset($positionMap[$parentId])) {
+                // سمت غیر ریشه → زیر سمت والد
+                $positionMap[$parentId]['children'][] = &$positionNode;
+            } else {
+                // سمت ریشه → زیر واحد مربوطه
+                if (isset($unitMap[$unitId])) {
+                    $unitMap[$unitId]['children'][] = &$positionNode;
+                }
+            }
+        }
+        unset($positionNode);
+
+        // ── ۴. ساخت درخت واحدها ─────────────────────────
 
         $result = [];
-
         foreach ($units as $unit) {
-
             $node = &$unitMap[$unit->id];
 
-            /*
-            | اگر والد دارد، زیر والد قرار بگیرد
-            */
-
-            if (
-                $unit->parent_id &&
-                isset($unitMap[$unit->parent_id])
-            ) {
-
+            if ($unit->parent_id && isset($unitMap[$unit->parent_id])) {
+                // واحد زیر واحد دیگر
                 $unitMap[$unit->parent_id]['children'][] = &$node;
-
+            } elseif ($unit->parent_position_id && isset($positionMap[$unit->parent_position_id])) {
+                // ✅ واحد زیر سمت
+                $positionMap[$unit->parent_position_id]['children'][] = &$node;
             } else {
-
-                /*
-                | واحد بدون والد = ریشه
-                */
-
+                // واحد ریشه
                 $result[] = &$node;
             }
         }
-
         unset($node);
 
         return $result;
@@ -225,9 +170,6 @@ class OrganizationalPositionService
     /**
      * ایجاد سمت
      */
-// در فایل OrganizationalPositionService.php
-
-
     public function create(array $data): OrganizationalPosition
     {
         return DB::transaction(function () use ($data) {
@@ -260,7 +202,6 @@ class OrganizationalPositionService
             // ۲. اگر کاربری انتخاب شده بود، رابطه را در employee_positions ثبت کن
             if (!empty($data['user_id'])) {
                 $user = User::findOrFail($data['user_id']);
-
                 EmployeePosition::create([
                     'user_id'                  => $user->id,
                     'personnel_code'           => $user->personnel_code,
@@ -285,21 +226,16 @@ class OrganizationalPositionService
     public function update(
         OrganizationalPosition $position,
         array                  $data
-    ): OrganizationalPosition
-    {
+    ): OrganizationalPosition {
         return DB::transaction(function () use ($position, $data) {
-
             // ── به‌روزرسانی parent_id ─────────────────────────
             if (array_key_exists('parent_id', $data)) {
                 $parentId = $data['parent_id'];
-
                 if ($parentId) {
                     $parent = OrganizationalPosition::findOrFail($parentId);
                     $unit = OrganizationalUnit::findOrFail($position->organizational_unit_id);
-
                     $this->validateParent($position, $parent, $unit);
                 }
-
                 $position->parent_id = $parentId;
             }
 
@@ -307,27 +243,21 @@ class OrganizationalPositionService
             if (array_key_exists('post_title', $data)) {
                 $position->post_title = $data['post_title'];
             }
-
             if (array_key_exists('post_code', $data)) {
                 $position->post_code = $data['post_code'];
             }
-
             if (array_key_exists('job_title', $data)) {
                 $position->job_title = $data['job_title'];
             }
-
             if (array_key_exists('job_code', $data)) {
                 $position->job_code = $data['job_code'];
             }
-
             if (array_key_exists('description', $data)) {
                 $position->description = $data['description'];
             }
-
             if (array_key_exists('sort_order', $data)) {
                 $position->sort_order = $data['sort_order'];
             }
-
             if (array_key_exists('is_active', $data)) {
                 $position->is_active = $data['is_active'];
             }
@@ -342,30 +272,22 @@ class OrganizationalPositionService
             return $position->fresh([
                 'unit',
                 'parent',
-                'employees.user', // برای بازگرداندن اطلاعات پرسنل جدید
+                'employees.user',
             ]);
         });
     }
 
     /**
      * همگام‌سازی نگاشت پرسنل با سمت
-     * - اگر user_id معتبر باشد: رکورد را ایجاد/به‌روزرسانی می‌کند
-     * - اگر null باشد: رکورد نگاشت را حذف می‌کند
      */
     private function syncEmployeePosition(OrganizationalPosition $position, ?int $userId): void
     {
-        // ۱. حذف نگاشت فعلی سمت (کاربر قبلی از این سمت خارج می‌شود)
         EmployeePosition::where('organizational_position_id', $position->id)->delete();
 
-        // ۲. اگر کاربر جدیدی انتخاب شده
         if ($userId) {
             $user = User::findOrFail($userId);
-
-            // ۳. حذف رکورد قبلی این کاربر از هر سمت دیگری
-            // (به دلیل unique constraint روی user_id)
             EmployeePosition::where('user_id', $user->id)->delete();
 
-            // ۴. ایجاد رکورد جدید برای این کاربر در سمت فعلی
             EmployeePosition::create([
                 'user_id'                    => $user->id,
                 'personnel_code'             => $user->personnel_code,
@@ -384,165 +306,66 @@ class OrganizationalPositionService
     /**
      * جابه‌جایی سمت در ساختار
      */
-    /**
-     * جابه‌جایی سمت در ساختار
-     */
     public function move(
         OrganizationalPosition $position,
         ?int $parentId,
         ?int $sortOrder = null,
         ?int $organizationalUnitId = null
     ): OrganizationalPosition {
-
         return DB::transaction(function () use (
             $position,
             $parentId,
             $sortOrder,
             $organizationalUnitId
         ) {
-
-            /*
-            |--------------------------------------------------------------------------
-            | تعیین واحد مقصد
-            |--------------------------------------------------------------------------
-            */
-
             if ($parentId !== null) {
-
-                $parent = OrganizationalPosition::findOrFail(
-                    $parentId
-                );
-
-                /*
-                 * وقتی سمت زیر یک سمت دیگر قرار می‌گیرد،
-                 * واحد مقصد باید واحد والد باشد.
-                 */
+                $parent = OrganizationalPosition::findOrFail($parentId);
                 $targetUnitId = $parent->organizational_unit_id;
-
-                $targetUnit = OrganizationalUnit::findOrFail(
-                    $targetUnitId
-                );
-
-                $this->validateParent(
-                    $position,
-                    $parent,
-                    $targetUnit
-                );
-
+                $targetUnit = OrganizationalUnit::findOrFail($targetUnitId);
+                $this->validateParent($position, $parent, $targetUnit);
             } else {
-
-                /*
-                 * وقتی سمت مستقیماً زیر واحد قرار می‌گیرد،
-                 * Frontend باید واحد مقصد را ارسال کند.
-                 */
                 if ($organizationalUnitId === null) {
-                    throw new RuntimeException(
-                        'واحد سازمانی مقصد مشخص نشده است.'
-                    );
+                    throw new RuntimeException('واحد سازمانی مقصد مشخص نشده است.');
                 }
-
-                $targetUnit = OrganizationalUnit::findOrFail(
-                    $organizationalUnitId
-                );
-
+                $targetUnit = OrganizationalUnit::findOrFail($organizationalUnitId);
                 $targetUnitId = $targetUnit->id;
             }
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | وضعیت قبلی
-            |--------------------------------------------------------------------------
-            */
 
             $oldUnitId = $position->organizational_unit_id;
             $oldParentId = $position->parent_id;
 
-
-            /*
-            |--------------------------------------------------------------------------
-            | تعیین sort_order
-            |--------------------------------------------------------------------------
-            */
-
             if ($sortOrder === null) {
-
-                $sortOrder = $this->nextSortOrder(
-                    $targetUnitId,
-                    $parentId,
-                    $position->id
-                );
+                $sortOrder = $this->nextSortOrder($targetUnitId, $parentId, $position->id);
             }
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | انتقال
-            |--------------------------------------------------------------------------
-            */
 
             $position->organizational_unit_id = $targetUnitId;
             $position->parent_id = $parentId;
             $position->sort_order = $sortOrder;
-
             $position->save();
 
+            $this->normalizeSortOrders($oldUnitId, $oldParentId);
+            $this->normalizeSortOrders($targetUnitId, $parentId);
 
-            /*
-            |--------------------------------------------------------------------------
-            | مرتب‌سازی مجدد والد قبلی
-            |--------------------------------------------------------------------------
-            */
-
-            $this->normalizeSortOrders(
-                $oldUnitId,
-                $oldParentId
-            );
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | مرتب‌سازی مجدد والد جدید
-            |--------------------------------------------------------------------------
-            */
-
-            $this->normalizeSortOrders(
-                $targetUnitId,
-                $parentId
-            );
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | خروجی
-            |--------------------------------------------------------------------------
-            */
-
-            return $position->fresh([
-                'unit',
-                'parent',
-            ]);
+            return $position->fresh(['unit', 'parent']);
         });
     }
 
     /**
      * حذف سمت
      */
-    public function delete(
-        OrganizationalPosition $position
-    ): void
+    public function delete(OrganizationalPosition $position): void
     {
-
         if ($position->employees()->exists()) {
-            throw new RuntimeException(
-                'این سمت دارای پرسنل است و قابل حذف نیست.'
-            );
+            throw new RuntimeException('این سمت دارای پرسنل است و قابل حذف نیست.');
         }
 
         if ($position->children()->exists()) {
-            throw new RuntimeException(
-                'این سمت دارای زیرمجموعه است و قابل حذف نیست.'
-            );
+            throw new RuntimeException('این سمت دارای زیرمجموعه است و قابل حذف نیست.');
+        }
+
+        // ✅ بررسی اینکه آیا واحدی زیر این سمت قرار دارد
+        if (OrganizationalUnit::where('parent_position_id', $position->id)->exists()) {
+            throw new RuntimeException('این سمت دارای واحدهای زیرمجموعه است و قابل حذف نیست.');
         }
 
         $position->delete();
@@ -555,39 +378,21 @@ class OrganizationalPositionService
         ?OrganizationalPosition $position,
         OrganizationalPosition  $parent,
         OrganizationalUnit      $unit
-    ): void
-    {
-
-        // خودش والد خودش نباشد
+    ): void {
         if ($position && $position->id === $parent->id) {
-            throw new RuntimeException(
-                'یک سمت نمی‌تواند والد خودش باشد.'
-            );
+            throw new RuntimeException('یک سمت نمی‌تواند والد خودش باشد.');
         }
 
-        // والد باید در همان واحد باشد
-        if (
-            $parent->organizational_unit_id !==
-            $unit->id
-        ) {
-            throw new RuntimeException(
-                'سمت والد باید متعلق به همان واحد سازمانی باشد.'
-            );
+        if ($parent->organizational_unit_id !== $unit->id) {
+            throw new RuntimeException('سمت والد باید متعلق به همان واحد سازمانی باشد.');
         }
 
-        // جلوگیری از ایجاد حلقه
         if ($position) {
-
             $current = $parent;
-
             while ($current) {
-
                 if ($current->id === $position->id) {
-                    throw new RuntimeException(
-                        'امکان ایجاد حلقه در ساختار سازمانی وجود ندارد.'
-                    );
+                    throw new RuntimeException('امکان ایجاد حلقه در ساختار سازمانی وجود ندارد.');
                 }
-
                 $current = $current->parent;
             }
         }
@@ -596,13 +401,8 @@ class OrganizationalPositionService
     /**
      * شماره ترتیب بعدی
      */
-    private function nextSortOrder(
-        int  $unitId,
-        ?int $parentId,
-        ?int $exceptId = null
-    ): int
+    private function nextSortOrder(int $unitId, ?int $parentId, ?int $exceptId = null): int
     {
-
         $query = OrganizationalPosition::query()
             ->where('organizational_unit_id', $unitId)
             ->where('parent_id', $parentId);
@@ -611,18 +411,14 @@ class OrganizationalPositionService
             $query->where('id', '!=', $exceptId);
         }
 
-        return ((int)$query->max('sort_order')) + 1;
+        return ((int) $query->max('sort_order')) + 1;
     }
-
 
     /**
      * مرتب‌سازی مجدد سمت‌های هم‌سطح
      */
-    private function normalizeSortOrders(
-        int $unitId,
-        ?int $parentId
-    ): void {
-
+    private function normalizeSortOrders(int $unitId, ?int $parentId): void
+    {
         $positions = OrganizationalPosition::query()
             ->where('organizational_unit_id', $unitId)
             ->where('parent_id', $parentId)
@@ -631,16 +427,9 @@ class OrganizationalPositionService
             ->get();
 
         foreach ($positions as $index => $position) {
-
             if ($position->sort_order !== $index) {
-
-                $position->update([
-                    'sort_order' => $index,
-                ]);
+                $position->update(['sort_order' => $index]);
             }
         }
     }
-
-
-
 }
