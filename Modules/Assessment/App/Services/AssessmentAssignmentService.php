@@ -32,8 +32,17 @@ class AssessmentAssignmentService
     public function plan(?int $cycleId = null, ?int $periodId = null): array
     {
         $snapshot = $this->hierarchy->snapshot();
+
+        // ✅ بهینه‌سازی: ساخت lookup table برای دسترسی O(1)
+        $snapshot['employees_by_position'] = $snapshot['employees']
+            ->groupBy('organizational_position_id');
+
         $profiles = AssessmentPost::where('is_active', true)->orderBy('id')->get();
         $mappings = AssessmentPostMapping::active()->orderBy('id')->get();
+
+        // ✅ بهینه‌سازی: گروه‌بندی mappings بر اساس نوع
+        $mappingsByType = $mappings->groupBy('mapping_type');
+
         $existing = Assessment::query()
             ->when($periodId !== null, fn($query) => $query->where('period_id', $periodId))
             ->when($periodId === null, fn($query) => $query->where('cycle_id', $cycleId))
@@ -41,6 +50,10 @@ class AssessmentAssignmentService
         $rows = [];
         $summary = array_fill_keys(['total', 'ready', 'exists', 'no_profile', 'no_evaluator', 'out_of_scope'], 0);
 
+
+        \DB::listen(function ($query) {
+            \Log::info('DB Query: ' . $query->sql . ' | Time: ' . $query->time . 'ms');
+        });
         foreach ($snapshot['employees'] as $employee) {
             $family = $this->classifier->classify($employee->post_title);
             $profile = $this->profileFor($employee, $profiles, $mappings);
@@ -88,29 +101,56 @@ class AssessmentAssignmentService
 
     public function profileFor(EmployeePosition $employee, ?Collection $profiles = null, ?Collection $mappings = null): ?AssessmentPost
     {
+        // ✅ Memoization: cache بر اساس post_title و unit_id
+        static $cache = [];
+        $cacheKey = ($employee->post_title ?? '') . '|' . ($employee->organizational_unit_id ?? '');
+
+        if (isset($cache[$cacheKey])) {
+            return $cache[$cacheKey];
+        }
+
         $profiles ??= AssessmentPost::where('is_active', true)->orderBy('id')->get();
         $mappings ??= AssessmentPostMapping::active()->orderBy('id')->get();
-        foreach ($mappings->where('mapping_type', AssessmentPostMapping::TYPE_TITLE_PATTERN) as $mapping) {
-            $pattern = str_replace('%', '.*', preg_quote($mapping->post_title_pattern ?? '', '/'));
-            if ($mapping->post_title_pattern !== null
-                && preg_match('/^' . $pattern . '$/u', $employee->post_title ?? '') === 1
-                && $profile = $profiles->firstWhere('id', $mapping->assessment_post_id)) {
-                return $profile;
+
+        // ✅ بهینه‌سازی: گروه‌بندی mappings بر اساس نوع
+        $mappingsByType = $mappings->groupBy('mapping_type');
+
+        // ۱. بررسی mappings با TYPE_TITLE_PATTERN
+        $titleMappings = $mappingsByType[AssessmentPostMapping::TYPE_TITLE_PATTERN] ?? collect();
+        foreach ($titleMappings as $mapping) {
+            $pattern = $mapping->post_title_pattern ?? '';
+            if ($pattern !== null) {
+                // ✅ cache کردن regex compiled
+                static $regexCache = [];
+                if (!isset($regexCache[$pattern])) {
+                    $regexCache[$pattern] = '/^' . str_replace('%', '.*', preg_quote($pattern, '/')) . '$/u';
+                }
+
+                if (preg_match($regexCache[$pattern], $employee->post_title ?? '') === 1
+                    && $profile = $profiles->firstWhere('id', $mapping->assessment_post_id)) {
+                    return $cache[$cacheKey] = $profile;
+                }
             }
         }
-        foreach ($mappings->where('mapping_type', AssessmentPostMapping::TYPE_UNIT) as $mapping) {
+
+        // ۲. بررسی mappings با TYPE_UNIT
+        $unitMappings = $mappingsByType[AssessmentPostMapping::TYPE_UNIT] ?? collect();
+        foreach ($unitMappings as $mapping) {
             if ((int) $mapping->organizational_unit_id === (int) $employee->organizational_unit_id
                 && $profile = $profiles->firstWhere('id', $mapping->assessment_post_id)) {
-                return $profile;
+                return $cache[$cacheKey] = $profile;
             }
         }
 
+        // ۳. بررسی بر اساس خانواده شغلی
         $family = $this->classifier->classify($employee->post_title);
         if (!$family) {
-            return null;
+            return $cache[$cacheKey] = null;
         }
 
-        return $profiles->first(fn($profile) => $profile->grade === $family && $profile->unit === $employee->unit?->title)
+        $result = $profiles->first(fn($profile) => $profile->grade === $family && $profile->unit === $employee->unit?->title)
             ?? $profiles->first(fn($profile) => $profile->grade === $family && $profile->domain === $employee->unit?->title);
+
+        return $cache[$cacheKey] = $result;
     }
 }

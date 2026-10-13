@@ -202,6 +202,10 @@ class OrganizationalPositionService
             // ۲. اگر کاربری انتخاب شده بود، رابطه را در employee_positions ثبت کن
             if (!empty($data['user_id'])) {
                 $user = User::findOrFail($data['user_id']);
+
+                // ✅ حذف رکوردهای قبلی کاربر (اگر سمت دیگری داشته)
+                EmployeePosition::where('user_id', $user->id)->delete();
+
                 EmployeePosition::create([
                     'user_id'                  => $user->id,
                     'personnel_code'           => $user->personnel_code,
@@ -219,6 +223,7 @@ class OrganizationalPositionService
             return $position;
         });
     }
+
 
     /**
      * ویرایش اطلاعات سمت

@@ -40,6 +40,7 @@ class OrganizationHierarchyService
         $units = $snapshot['units'];
 
         $position = $positions->get($employee->organizational_position_id);
+
         if (!$position) {
             return collect();
         }
@@ -54,11 +55,13 @@ class OrganizationHierarchyService
                 throw new RuntimeException('حلقه در ساختار سمت‌های سازمانی وجود دارد.');
             }
             $visited[(int) $parent->id] = true;
+
+            // ✅ استفاده از lookup table
             $candidates = $candidates->merge($this->occupants($parent->id, $employee, $snapshot));
             $parentId = $parent->parent_id;
         }
 
-        // پیمایش واحدهای والد - ✅ حالا با پشتیبانی از parent_position_id
+        // پیمایش واحدهای والد
         $unitId = $units->get($position->organizational_unit_id)?->parent_id;
         $visitedUnits = [];
 
@@ -73,11 +76,10 @@ class OrganizationHierarchyService
                 $candidates = $candidates->merge($this->occupants($root->id, $employee, $snapshot));
             }
 
-            // ✅ اگر واحد زیر سمتی قرار دارد، آن سمت و والد‌هایش را هم بررسی کن
+            // اگر واحد زیر سمتی قرار دارد
             if ($unit->parent_position_id && $parentPosition = $positions->get($unit->parent_position_id)) {
                 $candidates = $candidates->merge($this->occupants($parentPosition->id, $employee, $snapshot));
 
-                // پیمایش والد‌های آن سمت
                 $parentId = $parentPosition->parent_id;
                 while ($parentId && $parent = $positions->get($parentId)) {
                     if (isset($visited[(int) $parent->id])) {
@@ -88,7 +90,6 @@ class OrganizationHierarchyService
                     $parentId = $parent->parent_id;
                 }
 
-                // ادامه پیمایش از واحد آن سمت
                 $unitId = $units->get($parentPosition->organizational_unit_id)?->parent_id;
             } else {
                 $unitId = $unit->parent_id;
@@ -217,8 +218,10 @@ class OrganizationHierarchyService
 
     private function occupants(int $positionId, EmployeePosition $employee, array $snapshot): Collection
     {
-        return $snapshot['employees']->where('organizational_position_id', $positionId)
-            ->where('user_id', '!=', $employee->user_id)->values();
+        // ✅ دسترسی O(1) به جای O(n)
+        $occupants = $snapshot['employees_by_position'][$positionId] ?? collect();
+
+        return $occupants->reject(fn($emp) => $emp->user_id === $employee->user_id)->values();
     }
 
     private function positionNode(OrganizationalPosition $position, Collection $positions, array $snapshot, bool $includeEmployees): array
