@@ -170,21 +170,43 @@ Route::middleware(['auth:sanctum', 'user.can_login'])->prefix('v1/hr')->name('hr
             Route::post(
                 '/organizational-units/{organizationalUnit}/move',
                 [OrganizationalUnitController::class, 'move']
-            );
+            )->middleware('permission:hr.manage');
             Route::get(
                 '/organizational-positions/tree',
                 [OrganizationalPositionController::class, 'tree']
-            );
+            )->middleware('permission:hr.manage');
 
             Route::post(
                 '/organizational-positions/{organizationalPosition}/move',
                 [OrganizationalPositionController::class, 'move']
-            );
+            )->middleware('permission:hr.manage');
+            // تخصیص پرسنل به سمت
+            Route::post('/organizational-positions/{organizationalPosition}/assign-employees',
+                [OrganizationalPositionController::class, 'assignEmployees']
+            )->middleware('permission:hr.manage');
 
+            // حذف تخصیص پرسنل
+            Route::post('/organizational-positions/{organizationalPosition}/unassign-employees',
+                [OrganizationalPositionController::class, 'unassignEmployees']
+            )->middleware('permission:hr.manage');
+
+            // لیست پرسنل قابل تخصیص
+            Route::get('/organizational-positions/{organizationalPosition}/available-employees',
+                [OrganizationalPositionController::class, 'availableEmployees']
+            )->middleware('permission:hr.manage');
+
+            // Import از اکسل
+            Route::post('/organizational-positions/{organizationalPosition}/excel/preview',
+                [OrganizationalPositionController::class, 'previewExcelImport']
+            )->middleware('permission:hr.manage');
+
+            Route::post('/organizational-positions/{organizationalPosition}/excel/confirm',
+                [OrganizationalPositionController::class, 'confirmExcelImport']
+            )->middleware('permission:hr.manage');
 
             Route::apiResource(
                 'organizational-positions',
                 OrganizationalPositionController::class
-            );
+            )->middleware('permission:hr.manage');
 
 });

@@ -316,4 +316,169 @@ class OrganizationalPositionController
         }
     }
 
+
+    /**
+     * تخصیص گروهی پرسنل به سمت
+     *
+     * POST /api/organizational-positions/{position}/assign-employees
+     * Body: { "user_ids": [1, 2, 3, 4, 5] }
+     */
+    public function assignEmployees(
+        Request $request,
+        OrganizationalPosition $organizationalPosition
+         ): JsonResponse {
+        $validated = $request->validate([
+            'user_ids' => ['required', 'array', 'min:1'],
+            'user_ids.*' => ['integer', 'exists:users,id'],
+        ]);
+
+        try {
+            $result = $this->service->assignEmployees(
+                $organizationalPosition,
+                $validated['user_ids']
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => sprintf(
+                    '%d نفر با موفقیت تخصیص یافتند.',
+                    count($result['assigned'])
+                ),
+                'data' => $result,
+            ]);
+        } catch (Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * حذف تخصیص پرسنل از سمت
+     *
+     * POST /api/organizational-positions/{position}/unassign-employees
+     * Body: { "user_ids": [1, 2, 3] } یا {} برای حذف همه
+     */
+    public function unassignEmployees(
+        Request $request,
+        OrganizationalPosition $organizationalPosition
+    ): JsonResponse {
+        $validated = $request->validate([
+            'user_ids' => ['nullable', 'array'],
+            'user_ids.*' => ['integer', 'exists:users,id'],
+        ]);
+
+        try {
+            $result = $this->service->unassignEmployees(
+                $organizationalPosition,
+                $validated['user_ids'] ?? []
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => sprintf(
+                    '%d نفر از سمت حذف شدند.',
+                    $result['removed_count']
+                ),
+                'data' => $result,
+            ]);
+        } catch (Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * لیست پرسنل قابل تخصیص به سمت
+     *
+     * GET /api/organizational-positions/{position}/available-employees?search=xxx
+     */
+    public function availableEmployees(
+        Request $request,
+        OrganizationalPosition $organizationalPosition
+    ): JsonResponse {
+        $employees = $this->service->availableEmployees(
+            $organizationalPosition,
+            $request->input('search')
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => $employees,
+        ]);
+    }
+
+
+    /**
+     * پیش‌نمایش import از فایل اکسل
+     *
+     * POST /api/organizational-positions/{position}/excel/preview
+     * Body: multipart/form-data with 'file'
+     */
+    public function previewExcelImport(
+        Request $request,
+        OrganizationalPosition $organizationalPosition
+    ): JsonResponse {
+        $request->validate([
+            'file' => ['required', 'file', 'max:10240'], // حداکثر 10 مگابایت
+        ]);
+
+        try {
+            $result = $this->service->previewExcelImport(
+                $organizationalPosition,
+                $request->file('file')
+            );
+
+            return response()->json([
+                'success' => true,
+                'data' => $result,
+            ]);
+        } catch (Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * تایید import از فایل اکسل
+     *
+     * POST /api/organizational-positions/{position}/excel/confirm
+     * Body: { "user_ids": [1, 2, 3] }
+     */
+    public function confirmExcelImport(
+        Request $request,
+        OrganizationalPosition $organizationalPosition
+    ): JsonResponse {
+        $validated = $request->validate([
+            'user_ids' => ['required', 'array', 'min:1'],
+            'user_ids.*' => ['integer', 'exists:users,id'],
+        ]);
+
+        try {
+            $result = $this->service->assignEmployees(
+                $organizationalPosition,
+                $validated['user_ids']
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => sprintf(
+                    '%d نفر از فایل اکسل با موفقیت تخصیص یافتند.',
+                    count($result['assigned'])
+                ),
+                'data' => $result,
+            ]);
+        } catch (Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
 }

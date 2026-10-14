@@ -7,6 +7,7 @@
     "require": {
         "php": "^8.1",
         "ext-libxml": "*",
+        "ext-pdo": "*",
         "ext-simplexml": "*",
         "barryvdh/laravel-dompdf": "^3.1",
         "doctrine/dbal": "^3.10",
@@ -19,8 +20,7 @@
         "morilog/jalali": "^3.5",
         "nwidart/laravel-modules": "^10.0",
         "phpoffice/phpspreadsheet": "^1.30",
-        "spatie/laravel-permission": "^6.25",
-        "ext-pdo": "*"
+        "spatie/laravel-permission": "^6.25"
     },
     "require-dev": {
         "fakerphp/faker": "^1.9.1",

@@ -2,6 +2,7 @@
 
 namespace Modules\HR\App\Services;
 
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Modules\HR\App\Models\OrganizationalPosition;
 use Modules\HR\App\Models\OrganizationalUnit;
@@ -437,4 +438,335 @@ class OrganizationalPositionService
             }
         }
     }
+
+    /**
+     * تخصیص گروهی پرسنل به یک سمت
+     *
+     * @param OrganizationalPosition $position سمت مقصد
+     * @param array $userIds لیست شناسه کاربران
+     * @return array نتیجه عملیات
+     */
+    public function assignEmployees(
+        OrganizationalPosition $position,
+        array $userIds
+    ): array {
+        if (!$position->is_active) {
+            throw new RuntimeException('سمت غیرفعال است و امکان تخصیص پرسنل وجود ندارد.');
+        }
+
+        $result = [
+            'assigned' => [],
+            'failed' => [],
+        ];
+
+        DB::transaction(function () use ($position, $userIds, &$result) {
+            foreach ($userIds as $userId) {
+                try {
+                    $user = User::findOrFail($userId);
+
+                    // بررسی فعال بودن کاربر
+                    if (!$user->is_active) {
+                        $result['failed'][] = [
+                            'user_id' => $userId,
+                            'reason' => 'کاربر غیرفعال است.',
+                        ];
+                        continue;
+                    }
+
+                    // حذف نگاشت قبلی کاربر
+                    EmployeePosition::where('user_id', $user->id)->delete();
+
+                    // ایجاد نگاشت جدید
+                    EmployeePosition::create([
+                        'user_id' => $user->id,
+                        'personnel_code' => $user->personnel_code,
+                        'organizational_unit_id' => $position->organizational_unit_id,
+                        'organizational_position_id' => $position->id,
+                        'post_code' => $position->post_code,
+                        'post_title' => $position->post_title,
+                        'gt_post_ref' => $position->gt_post_ref,
+                        'job_code' => $position->job_code,
+                        'job_title' => $position->job_title,
+                        'gt_job_ref' => $position->gt_job_ref,
+                        'synced_at' => now(),
+                        'sync_failed' => false,
+                    ]);
+
+                    $result['assigned'][] = [
+                        'user_id' => $userId,
+                        'name' => $user->name,
+                        'personnel_code' => $user->personnel_code,
+                    ];
+                } catch (\Throwable $e) {
+                    $result['failed'][] = [
+                        'user_id' => $userId,
+                        'reason' => $e->getMessage(),
+                    ];
+                }
+            }
+        });
+
+        return $result;
+    }
+
+    /**
+     * حذف تخصیص پرسنل از یک سمت
+     *
+     * @param OrganizationalPosition $position سمت
+     * @param array $userIds لیست شناسه کاربران (اگر خالی باشد، همه)
+     * @return array نتیجه عملیات
+     */
+    public function unassignEmployees(
+        OrganizationalPosition $position,
+        array $userIds = []
+    ): array {
+        $query = EmployeePosition::where('organizational_position_id', $position->id);
+
+        if (!empty($userIds)) {
+            $query->whereIn('user_id', $userIds);
+        }
+
+        $deleted = $query->delete();
+
+        return [
+            'removed_count' => $deleted,
+        ];
+    }
+
+    /**
+     * لیست پرسنل قابل تخصیص (که هنوز به این سمت تخصیص نیافته‌اند)
+     */
+    public function availableEmployees(
+        OrganizationalPosition $position,
+        ?string $search = null
+    ) {
+        $query = User::query()
+            ->where('is_active', true)
+            ->whereNotNull('personnel_code')
+            ->whereNotIn('id', function ($q) use ($position) {
+                $q->select('user_id')
+                    ->from('employee_positions')
+                    ->where('organizational_position_id', $position->id);
+            });
+
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'LIKE', "%{$search}%")
+                    ->orWhere('personnel_code', 'LIKE', "%{$search}%")
+                    ->orWhere('mobile', 'LIKE', "%{$search}%");
+            });
+        }
+
+        return $query->select('id', 'name', 'personnel_code', 'mobile')
+            ->orderBy('personnel_code')
+            ->limit(100)
+            ->get();
+    }
+
+    /**
+     * پیش‌نمایش import از فایل اکسل
+     */
+    public function previewExcelImport(
+        OrganizationalPosition $position,
+        UploadedFile $file
+    ): array {
+        if (!$position->is_active) {
+            throw new RuntimeException('سمت غیرفعال است.');
+        }
+
+        $personnelCodes = $this->parseExcelFile($file);
+
+        if (empty($personnelCodes)) {
+            throw new RuntimeException('هیچ کد پرسنلی در فایل یافت نشد.');
+        }
+
+        if (count($personnelCodes) > 1000) {
+            throw new RuntimeException('حداکثر 1000 رکورد در هر فایل مجاز است.');
+        }
+
+        $valid = [];
+        $invalid = [];
+        $alreadyAssigned = [];
+
+        // حذف کدهای تکراری
+        $uniqueCodes = array_unique($personnelCodes);
+
+        foreach ($uniqueCodes as $code) {
+            $code = trim((string) $code);
+
+            if (empty($code)) {
+                continue;
+            }
+
+            $user = User::where('personnel_code', $code)->first();
+
+            if (!$user) {
+                $invalid[] = [
+                    'personnel_code' => $code,
+                    'name' => null,
+                    'reason' => 'کاربر با این کد پرسنلی یافت نشد',
+                ];
+                continue;
+            }
+
+            if (!$user->is_active) {
+                $invalid[] = [
+                    'personnel_code' => $code,
+                    'name' => $user->name,
+                    'reason' => 'کاربر غیرفعال است',
+                ];
+                continue;
+            }
+
+            // بررسی اینکه آیا کاربر در حال حاضر در همین سمت است
+            $isAlreadyInPosition = EmployeePosition::where('user_id', $user->id)
+                ->where('organizational_position_id', $position->id)
+                ->exists();
+
+            if ($isAlreadyInPosition) {
+                $alreadyAssigned[] = [
+                    'personnel_code' => $code,
+                    'name' => $user->name,
+                ];
+                continue;
+            }
+
+            // بررسی سمت فعلی کاربر
+            $currentAssignment = EmployeePosition::with('unit:id,title')
+                ->where('user_id', $user->id)
+                ->first();
+
+            $valid[] = [
+                'user_id' => $user->id,
+                'personnel_code' => $code,
+                'name' => $user->name,
+                'current_position' => $currentAssignment?->post_title,
+                'current_unit' => $currentAssignment?->unit?->title,
+            ];
+        }
+
+        return [
+            'valid' => $valid,
+            'invalid' => $invalid,
+            'already_assigned' => $alreadyAssigned,
+            'summary' => [
+                'total' => count($uniqueCodes),
+                'valid' => count($valid),
+                'invalid' => count($invalid),
+                'already_assigned' => count($alreadyAssigned),
+            ],
+        ];
+    }
+
+    /**
+     * پارس کردن فایل اکسل و استخراج کدهای پرسنلی
+     */
+    private function parseExcelFile(UploadedFile $file): array
+    {
+        $extension = strtolower($file->getClientOriginalExtension());
+
+        if (!in_array($extension, ['xlsx', 'xls', 'csv'])) {
+            throw new RuntimeException(
+                'فرمت فایل نامعتبر است. فقط فایل‌های Excel (xlsx, xls) و CSV مجاز هستند.'
+            );
+        }
+
+        $filePath = $file->getRealPath();
+
+        if ($extension === 'csv') {
+            return $this->parseCsvFile($filePath);
+        }
+
+        return $this->parseExcelSpreadsheet($filePath);
+    }
+
+    private function parseCsvFile(string $filePath): array
+    {
+        $codes = [];
+        $handle = fopen($filePath, 'r');
+
+        if (!$handle) {
+            throw new RuntimeException('خطا در خواندن فایل CSV');
+        }
+
+        $isFirstRow = true;
+        while (($row = fgetcsv($handle)) !== false) {
+            if ($isFirstRow) {
+                $isFirstRow = false;
+                if ($this->isHeaderRow($row)) {
+                    continue;
+                }
+            }
+
+            if (!empty($row[0])) {
+                $codes[] = trim((string) $row[0]);
+            }
+        }
+
+        fclose($handle);
+
+        return $codes;
+    }
+
+    private function parseExcelSpreadsheet(string $filePath): array
+    {
+        if (!class_exists(\PhpOffice\PhpSpreadsheet\IOFactory::class)) {
+            throw new RuntimeException(
+                'پکیج PhpSpreadsheet نصب نیست. لطفاً با دستور زیر نصب کنید: ' .
+                'composer require phpoffice/phpspreadsheet'
+            );
+        }
+
+        try {
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($filePath);
+            $rows = $spreadsheet->getActiveSheet()->toArray();
+        } catch (\Throwable $e) {
+            throw new RuntimeException('خطا در خواندن فایل اکسل: ' . $e->getMessage());
+        }
+
+        $codes = [];
+        $isFirstRow = true;
+
+        foreach ($rows as $row) {
+            if ($isFirstRow) {
+                $isFirstRow = false;
+                if ($this->isHeaderRow($row)) {
+                    continue;
+                }
+            }
+
+            if (!empty($row[0])) {
+                $codes[] = trim((string) $row[0]);
+            }
+        }
+
+        return $codes;
+    }
+
+    /**
+     * تشخیص ردیف عنوان در فایل اکسل
+     */
+    private function isHeaderRow(array $row): bool
+    {
+        if (empty($row)) return false;
+
+        $firstCell = strtolower(trim((string) ($row[0] ?? '')));
+
+        if (empty($firstCell)) return false;
+
+        $headerKeywords = [
+            'کد پرسنلی', 'کدپرسنلی', 'کد پرسنلي', 'پرسنلی', 'شماره پرسنلی',
+            'personnel_code', 'personnel code', 'personnelcode',
+            'کد', 'code',
+        ];
+
+        foreach ($headerKeywords as $keyword) {
+            if (str_contains($firstCell, $keyword)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
 }
