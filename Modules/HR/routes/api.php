@@ -3,6 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Modules\HR\App\Http\Controllers\EmployeeController;
+use Modules\HR\App\Http\Controllers\HRDashboardController;
 use Modules\HR\App\Http\Controllers\OrganizationalPositionController;
 use Modules\HR\App\Http\Controllers\OrganizationalUnitController;
 use Modules\HR\App\Http\Controllers\OrgChartController;
@@ -208,5 +209,12 @@ Route::middleware(['auth:sanctum', 'user.can_login'])->prefix('v1/hr')->name('hr
                 'organizational-positions',
                 OrganizationalPositionController::class
             )->middleware('permission:hr.manage');
+
+            Route::get('/dashboard/overview', [
+                HRDashboardController::class,
+                'overview',
+            ])
+                ->middleware('permission:hr.view')
+                ->name('dashboard.overview');
 
 });

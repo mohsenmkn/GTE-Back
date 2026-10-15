@@ -123,6 +123,7 @@ Route::prefix('v1/trip-expense')
                 Route::get('/trucks/driver/{userId}/current', [TruckController::class, 'getDriverCurrentTruck'])
                     ->name('trip-expense.trucks.driver-current')
                     ->middleware('permission:trip_expense.manage');
+
             });
 
             // ═══════ گزارش‌ها ═══════
