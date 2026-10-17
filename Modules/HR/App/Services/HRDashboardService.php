@@ -28,6 +28,7 @@ class HRDashboardService
             'organization'            => $this->getOrganizationAnalysis(),
             'training'                => $this->getTrainingAnalytics(),
             'assessment'              => $this->getAssessmentAnalytics(),
+            'span_of_control'         => $this->getSpanOfControlAnalysis(),  // ← جدید
             'charts'                  => [
                 'employees_by_unit'   => $this->getEmployeesByUnit(),
                 'workforce_composition' => $this->getWorkforceComposition(),
@@ -637,5 +638,94 @@ class HRDashboardService
         $jd = 1 + (($days < 186) ? ($days % 31) : (($days - 186) % 30));
 
         return [$jy, $jm, $jd];
+    }
+
+
+    /* ═══════════════════════════════════════════════
+ *  ۹. تحلیل دهانه مدیریت (Span of Control)
+ * ═══════════════════════════════════════════════ */
+
+    protected function getSpanOfControlAnalysis(): array
+    {
+        $emptyResult = [
+            'has_data'          => false,
+            'total_managers'    => 0,
+            'avg'               => 0,
+            'min'               => 0,
+            'max'               => 0,
+            'median'            => 0,
+            'distribution'      => [
+                'very_small' => 0,  // کمتر از ۳
+                'small'      => 0,  // ۳ تا ۵
+                'normal'     => 0,  // ۶ تا ۱۱ (استاندارد)
+                'large'      => 0,  // ۱۲ تا ۱۹
+                'very_large' => 0,  // ۲۰ به بالا
+            ],
+            'critical_managers' => [],
+        ];
+
+        // ── شناسایی سمت‌های مدیریتی (سمت‌هایی که زیرمجموعه دارند) ──
+        $managers = OrganizationalPosition::query()
+            ->where('is_active', true)
+            ->has('children')
+            ->withCount('children')
+            ->with('unit:id,title')
+            ->get();
+
+        if ($managers->isEmpty()) {
+            return $emptyResult;
+        }
+
+        $spans = $managers->pluck('children_count')->filter(fn($c) => $c > 0);
+
+        // ── توزیع دهانه مدیریت ──
+        $distribution = [
+            'very_small' => $spans->filter(fn($s) => $s < 3)->count(),
+            'small'      => $spans->filter(fn($s) => $s >= 3 && $s < 6)->count(),
+            'normal'     => $spans->filter(fn($s) => $s >= 6 && $s < 12)->count(),
+            'large'      => $spans->filter(fn($s) => $s >= 12 && $s < 20)->count(),
+            'very_large' => $spans->filter(fn($s) => $s >= 20)->count(),
+        ];
+
+        // ── مدیران با دهانه بحرانی (۱۵ زیرمجموعه به بالا) ──
+        $criticalManagers = $managers
+            ->filter(fn($m) => $m->children_count >= 15)
+            ->sortByDesc('children_count')
+            ->take(5)
+            ->map(fn($m) => [
+                'id'          => $m->id,
+                'position'    => $m->post_title ?? '—',
+                'unit'        => $m->unit?->title ?? '—',
+                'reports'     => (int) $m->children_count,
+                'severity'    => $m->children_count >= 20 ? 'critical' : 'warning',
+            ])
+            ->values()
+            ->toArray();
+
+        // ── مدیران با دهانه خیلی کوچک (کمتر از ۳ - احتمال ناکارآمدی) ──
+        $underutilizedManagers = $managers
+            ->filter(fn($m) => $m->children_count < 3)
+            ->sortBy('children_count')
+            ->take(5)
+            ->map(fn($m) => [
+                'id'       => $m->id,
+                'position' => $m->post_title ?? '—',
+                'unit'     => $m->unit?->title ?? '—',
+                'reports'  => (int) $m->children_count,
+            ])
+            ->values()
+            ->toArray();
+
+        return [
+            'has_data'              => true,
+            'total_managers'        => $managers->count(),
+            'avg'                   => round($spans->avg(), 1),
+            'min'                   => (int) $spans->min(),
+            'max'                   => (int) $spans->max(),
+            'median'                => round($spans->median(), 1),
+            'distribution'          => $distribution,
+            'critical_managers'     => $criticalManagers,
+            'underutilized_managers'=> $underutilizedManagers,
+        ];
     }
 }

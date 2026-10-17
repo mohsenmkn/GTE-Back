@@ -181,6 +181,9 @@ Route::middleware(['auth:sanctum', 'user.can_login'])->prefix('v1/hr')->name('hr
                 '/organizational-positions/{organizationalPosition}/move',
                 [OrganizationalPositionController::class, 'move']
             )->middleware('permission:hr.manage');
+
+
+
             // تخصیص پرسنل به سمت
             Route::post('/organizational-positions/{organizationalPosition}/assign-employees',
                 [OrganizationalPositionController::class, 'assignEmployees']
@@ -200,6 +203,12 @@ Route::middleware(['auth:sanctum', 'user.can_login'])->prefix('v1/hr')->name('hr
             Route::post('/organizational-positions/{organizationalPosition}/excel/preview',
                 [OrganizationalPositionController::class, 'previewExcelImport']
             )->middleware('permission:hr.manage');
+
+            Route::post('/organizational-positions/{organizationalPosition}/excel/confirm',
+                [OrganizationalPositionController::class, 'confirmExcelImport']
+            )->middleware('permission:hr.manage');
+
+
 
             Route::post('/organizational-positions/{organizationalPosition}/excel/confirm',
                 [OrganizationalPositionController::class, 'confirmExcelImport']

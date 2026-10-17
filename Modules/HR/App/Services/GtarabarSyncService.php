@@ -57,6 +57,9 @@ class GtarabarSyncService
     // ─────────────────────────────────────────────
     //  sync سمت و واحد سازمانی
     // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+//  sync سمت و واحد سازمانی
+// ─────────────────────────────────────────────
     public function syncUserPosition(User $user): ?EmployeePosition
     {
         if (empty($user->personnel_code)) return null;
@@ -67,44 +70,52 @@ class GtarabarSyncService
 
             if (!$employee) return null;
 
-            // اگر تغییری نکرده، فقط synced_at را به‌روز کن
             $existing = EmployeePosition::where('user_id', $user->id)->first();
 
+            // ═══ ✅ تشخیص تخصیص دستی ═══
+            // اگر کاربر به سمتی با is_custom = true تخصیص یافته،
+            // فیلدهای سمت نباید توسط سینک تغییر کنند
+            $isManuallyAssigned = false;
+            if ($existing?->organizational_position_id) {
+                $isManuallyAssigned = OrganizationalPosition::where('id', $existing->organizational_position_id)
+                    ->where('is_custom', true)
+                    ->exists();
+            }
+
+            // ── حالت ۱: تغییری نکرده ──────────────────
             if ($existing && !$this->hasPositionChanged($existing, $statute)) {
-
                 $unit = null;
-
                 if ($statute?->DepartmentRef) {
                     $unit = $this->syncDepartment($statute->DepartmentRef);
                 }
 
                 $organizationalPosition = null;
-
                 if ($unit && $statute?->PostRef) {
-                    $organizationalPosition = $this->syncOrganizationalPosition(
-                        $unit,
-                        $statute
-                    );
+                    $organizationalPosition = $this->syncOrganizationalPosition($unit, $statute);
                 }
 
-                $existing->update([
-                    'organizational_unit_id'     => $unit?->id,
-                    'organizational_position_id' => $organizationalPosition?->id,
-                    'synced_at'                  => now(),
-                    'sync_failed'                => false,
-                ]);
+                $updateData = [
+                    'organizational_unit_id' => $unit?->id,
+                    'synced_at'              => now(),
+                    'sync_failed'            => false,
+                ];
 
+                // ✅ فقط اگر دستی نیست، سمت را به‌روز کن
+                if (!$isManuallyAssigned) {
+                    $updateData['organizational_position_id'] = $organizationalPosition?->id;
+                }
+
+                $existing->update($updateData);
                 return $existing;
             }
 
-            // sync واحد سازمانی از DepartmentRef
+            // ── حالت ۲: تغییر کرده یا جدید ──────────────
             $unit = null;
             if ($statute?->DepartmentRef) {
                 $unit = $this->syncDepartment($statute->DepartmentRef);
             }
 
             $organizationalPosition = null;
-
             if ($unit && $statute?->PostRef) {
                 $organizationalPosition = $this->syncOrganizationalPosition(
                     unit: $unit,
@@ -112,31 +123,47 @@ class GtarabarSyncService
                 );
             }
 
+            // فیلدهایی که همیشه سینک می‌شوند (اطلاعات حکم)
+            $data = [
+                'personnel_code'                  => $user->personnel_code,
+                'gt_employee_id'                  => $employee->EmployeeID,
+                'gt_statute_id'                   => $statute?->EmployeeStatuteID,
+                'organizational_unit_id'          => $unit?->id,
+                'gt_organizational_structure_ref' => $statute?->OrganizationalStructureRef,
+                'gt_department_ref'               => $statute?->DepartmentRef,
+                'synced_at'                       => now(),
+                'sync_failed'                     => false,
+            ];
+
+            if ($isManuallyAssigned && $existing) {
+                // ═══ ✅ حالت دستی: فیلدهای سمت حفظ می‌شوند ═══
+                $data['organizational_position_id'] = $existing->organizational_position_id;
+                $data['post_code']                  = $existing->post_code;
+                $data['post_title']                 = $existing->post_title;
+                $data['gt_post_ref']                = $existing->gt_post_ref;
+                $data['job_code']                   = $existing->job_code;
+                $data['job_title']                  = $existing->job_title;
+                $data['gt_job_ref']                 = $existing->gt_job_ref;
+
+                Log::info("syncUserPosition: User {$user->id} manually assigned, skipping position update.", [
+                    'position_id' => $existing->organizational_position_id,
+                ]);
+            } else {
+                // ═══ حالت عادی: همه چیز از گستراب ═══
+                $data['organizational_position_id'] = $organizationalPosition?->id;
+                $data['gt_post_ref']                = $statute?->PostRef;
+                $data['post_code']                  = $statute?->PostCode;
+                $data['post_title']                 = $statute?->PostTitle;
+                $data['gt_job_ref']                 = $statute?->JobRef;
+                $data['job_code']                   = $statute?->JobCode;
+                $data['job_title']                  = $statute?->JobTitle;
+            }
+
             return EmployeePosition::updateOrCreate(
                 ['user_id' => $user->id],
-                [
-                    'personnel_code'                  => $user->personnel_code,
-                    'gt_employee_id'                  => $employee->EmployeeID,
-                    'gt_statute_id'                   => $statute?->EmployeeStatuteID,
-
-                    'gt_post_ref'                     => $statute?->PostRef,
-                    'post_code'                       => $statute?->PostCode,
-                    'post_title'                      => $statute?->PostTitle,
-
-                    'gt_job_ref'                      => $statute?->JobRef,
-                    'job_code'                        => $statute?->JobCode,
-                    'job_title'                       => $statute?->JobTitle,
-
-                    'organizational_unit_id'          => $unit?->id,
-                    'organizational_position_id'      => $organizationalPosition?->id,
-
-                    'gt_organizational_structure_ref' => $statute?->OrganizationalStructureRef,
-                    'gt_department_ref'               => $statute?->DepartmentRef,
-
-                    'synced_at'                       => now(),
-                    'sync_failed'                     => false,
-                ]
+                $data
             );
+
         } catch (\Exception $e) {
             Log::error("syncUserPosition({$user->id}) failed: {$e->getMessage()}");
             EmployeePosition::where('user_id', $user->id)

@@ -354,10 +354,13 @@ class OrganizationalPositionController
         }
     }
 
+
+
+
     /**
      * حذف تخصیص پرسنل از سمت
      *
-     * POST /api/organizational-positions/{position}/unassign-employees
+     * POST /organizational-positions/{position}/unassign-employees
      * Body: { "user_ids": [1, 2, 3] } یا {} برای حذف همه
      */
     public function unassignEmployees(
@@ -394,7 +397,7 @@ class OrganizationalPositionController
     /**
      * لیست پرسنل قابل تخصیص به سمت
      *
-     * GET /api/organizational-positions/{position}/available-employees?search=xxx
+     * GET /organizational-positions/{position}/available-employees?search=xxx
      */
     public function availableEmployees(
         Request $request,
@@ -411,11 +414,10 @@ class OrganizationalPositionController
         ]);
     }
 
-
     /**
      * پیش‌نمایش import از فایل اکسل
      *
-     * POST /api/organizational-positions/{position}/excel/preview
+     * POST /organizational-positions/{position}/excel/preview
      * Body: multipart/form-data with 'file'
      */
     public function previewExcelImport(
@@ -447,7 +449,7 @@ class OrganizationalPositionController
     /**
      * تایید import از فایل اکسل
      *
-     * POST /api/organizational-positions/{position}/excel/confirm
+     * POST /organizational-positions/{position}/excel/confirm
      * Body: { "user_ids": [1, 2, 3] }
      */
     public function confirmExcelImport(

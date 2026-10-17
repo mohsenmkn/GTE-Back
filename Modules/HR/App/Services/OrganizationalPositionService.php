@@ -439,6 +439,7 @@ class OrganizationalPositionService
         }
     }
 
+
     /**
      * تخصیص گروهی پرسنل به یک سمت
      *
@@ -468,7 +469,24 @@ class OrganizationalPositionService
                     if (!$user->is_active) {
                         $result['failed'][] = [
                             'user_id' => $userId,
+                            'name' => $user->name,
+                            'personnel_code' => $user->personnel_code,
                             'reason' => 'کاربر غیرفعال است.',
+                        ];
+                        continue;
+                    }
+
+                    // بررسی اینکه آیا کاربر در حال حاضر در همین سمت است
+                    $isAlreadyAssigned = EmployeePosition::where('user_id', $user->id)
+                        ->where('organizational_position_id', $position->id)
+                        ->exists();
+
+                    if ($isAlreadyAssigned) {
+                        $result['failed'][] = [
+                            'user_id' => $userId,
+                            'name' => $user->name,
+                            'personnel_code' => $user->personnel_code,
+                            'reason' => 'قبلاً به این سمت تخصیص یافته است.',
                         ];
                         continue;
                     }
@@ -478,18 +496,18 @@ class OrganizationalPositionService
 
                     // ایجاد نگاشت جدید
                     EmployeePosition::create([
-                        'user_id' => $user->id,
-                        'personnel_code' => $user->personnel_code,
-                        'organizational_unit_id' => $position->organizational_unit_id,
+                        'user_id'                    => $user->id,
+                        'personnel_code'             => $user->personnel_code,
+                        'organizational_unit_id'     => $position->organizational_unit_id,
                         'organizational_position_id' => $position->id,
-                        'post_code' => $position->post_code,
-                        'post_title' => $position->post_title,
-                        'gt_post_ref' => $position->gt_post_ref,
-                        'job_code' => $position->job_code,
-                        'job_title' => $position->job_title,
-                        'gt_job_ref' => $position->gt_job_ref,
-                        'synced_at' => now(),
-                        'sync_failed' => false,
+                        'post_code'                  => $position->post_code,
+                        'post_title'                 => $position->post_title,
+                        'gt_post_ref'                => $position->gt_post_ref,
+                        'job_code'                   => $position->job_code,
+                        'job_title'                  => $position->job_title,
+                        'gt_job_ref'                 => $position->gt_job_ref,
+                        'synced_at'                  => now(),
+                        'sync_failed'                => false,
                     ]);
 
                     $result['assigned'][] = [
@@ -541,24 +559,33 @@ class OrganizationalPositionService
         ?string $search = null
     ) {
         $query = User::query()
-            ->where('is_active', true)
-            ->whereNotNull('personnel_code')
-            ->whereNotIn('id', function ($q) use ($position) {
+            ->where('users.is_active', true)
+            ->whereNotNull('users.personnel_code')
+            ->where('users.personnel_code', '!=', '')
+            ->whereNotIn('users.id', function ($q) use ($position) {
                 $q->select('user_id')
                     ->from('employee_positions')
                     ->where('organizational_position_id', $position->id);
-            });
+            })
+            ->leftJoin('employee_positions', 'employee_positions.user_id', '=', 'users.id')
+            ->select(
+                'users.id',
+                'users.name',
+                'users.personnel_code',
+                'users.mobile',
+                'employee_positions.post_title as current_post_title',
+                'employee_positions.organizational_unit_id as current_unit_id'
+            );
 
         if ($search) {
             $query->where(function ($q) use ($search) {
-                $q->where('name', 'LIKE', "%{$search}%")
-                    ->orWhere('personnel_code', 'LIKE', "%{$search}%")
-                    ->orWhere('mobile', 'LIKE', "%{$search}%");
+                $q->where('users.name', 'LIKE', "%{$search}%")
+                    ->orWhere('users.personnel_code', 'LIKE', "%{$search}%")
+                    ->orWhere('users.mobile', 'LIKE', "%{$search}%");
             });
         }
 
-        return $query->select('id', 'name', 'personnel_code', 'mobile')
-            ->orderBy('personnel_code')
+        return $query->orderBy('users.personnel_code')
             ->limit(100)
             ->get();
     }
@@ -768,5 +795,4 @@ class OrganizationalPositionService
 
         return false;
     }
-
 }
