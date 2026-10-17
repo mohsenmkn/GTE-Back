@@ -117,7 +117,7 @@ class ImportAllFromGtarabar extends Command
     // ─────────────────────────────────────────────
     //  Import واحدها
     // ─────────────────────────────────────────────
-    private function importUnits(GtarabarSyncService $service, bool $dryRun): void
+    /*private function importUnits(GtarabarSyncService $service, bool $dryRun): void
     {
         $this->info('🏢 مرحله ۲: Import واحدهای سازمانی');
 
@@ -183,7 +183,7 @@ class ImportAllFromGtarabar extends Command
         );
 
         $this->newLine();
-    }
+    }*/
 
     // ─────────────────────────────────────────────
     //  Sync خانواده
