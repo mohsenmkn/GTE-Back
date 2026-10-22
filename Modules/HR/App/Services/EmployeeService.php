@@ -77,8 +77,11 @@ class EmployeeService
 
         $user = $position->user;
 
-        // اطلاعات استخدام از گستراب (live)
-        $employment = $this->getEmploymentInfo($position->gt_employee_id);
+        // اطلاعات استخدام، بیمه و تحصیلات از گستراب (live)
+        $gtEmployeeId = $position->gt_employee_id;
+        $employment = $this->getEmploymentInfo($gtEmployeeId);
+        $insurance = $this->getEmployeeInsuranceInfo($gtEmployeeId);
+        $education = $this->getEmployeeEducationInfo($gtEmployeeId);
 
         return [
             'user_id'        => $user->id,
@@ -104,10 +107,122 @@ class EmployeeService
             ] : null,
 
             'employment' => $employment,
+            'insurance'  => $insurance,
+            'education'  => $education,
 
             'synced_at'   => $position->synced_at,
             'sync_failed' => $position->sync_failed,
         ];
+    }
+
+    /**
+     * آخرین سابقه بیمه تأمین اجتماعی از گستراب.
+     * شماره بیمه در این سامانه در ستون Code جدول EmployeeRelatedOrganization ذخیره شده است.
+     */
+    private function getEmployeeInsuranceInfo(?int $employeeId): ?array
+    {
+        if (!$employeeId) {
+            return null;
+        }
+
+        try {
+            $insurance = DB::connection('gtarabar')
+                ->table('HCM3.EmployeeRelatedOrganization as ero')
+                ->leftJoin('HCM3.Organization as org', 'org.OrganizationID', '=', 'ero.OrganizationRef')
+                ->leftJoin('HCM3.OrganizationBranch as branch', 'branch.OrganizationBranchID', '=', 'ero.OrganizationBranchRef')
+                ->where('ero.EmployeeRef', $employeeId)
+                ->where('ero.OrganizationRef', 2)
+                ->where('ero.IsInsurance', 1)
+                ->where('ero.InsuranceType', 1)
+                ->orderByRaw('CASE WHEN ero.ExpiryDate IS NULL THEN 0 ELSE 1 END')
+                ->orderByDesc('ero.EffectiveDate')
+                ->orderByDesc('ero.EmployeeRelatedOrganizationID')
+                ->select([
+                    'ero.Code as number',
+                    'org.Title as organization',
+                    'ero.InsuranceType as type_code',
+                    'branch.Code as branch_code',
+                    'ero.EffectiveDate as effective_date',
+                    'ero.ExpiryDate as expiry_date',
+                ])
+                ->first();
+
+            if (!$insurance) {
+                return null;
+            }
+
+            return [
+                'number'         => $insurance->number,
+                'organization'   => $insurance->organization,
+                'type_code'      => $insurance->type_code,
+                'branch_code'    => $insurance->branch_code,
+                'effective_date' => $insurance->effective_date,
+                'expiry_date'    => $insurance->expiry_date,
+            ];
+        } catch (\Throwable $e) {
+            Log::error("getEmployeeInsuranceInfo({$employeeId}) failed: {$e->getMessage()}");
+            return null;
+        }
+    }
+
+    /**
+     * آخرین مدرک تحصیلی ثبت‌شده در گستراب.
+     */
+    private function getEmployeeEducationInfo(?int $employeeId): ?array
+    {
+        if (!$employeeId) {
+            return null;
+        }
+
+        try {
+            $education = DB::connection('gtarabar')
+                ->table('HCM3.EmployeeEducation as edu')
+                ->leftJoin('SYS3.Lookup as degree', function ($join) {
+                    $join->on('degree.Code', '=', 'edu.DegreeCode')
+                        ->where('degree.Type', '=', 'EducationDegree');
+                })
+                ->leftJoin('SYS3.Lookup as discipline', function ($join) {
+                    $join->on('discipline.Code', '=', 'edu.DisciplineCode')
+                        ->where('discipline.Type', '=', 'EducationDiscipline');
+                })
+                ->leftJoin('SYS3.Lookup as major', function ($join) {
+                    $join->on('major.Code', '=', 'edu.MajorCode')
+                        ->where('major.Type', '=', 'EducationMajor');
+                })
+                ->where('edu.EmployeeRef', $employeeId)
+                ->orderByRaw('CASE WHEN edu.EffectiveDate IS NULL THEN 1 ELSE 0 END')
+                ->orderByDesc('edu.EffectiveDate')
+                ->orderByDesc('edu.EmployeeEducationID')
+                ->select([
+                    'edu.EmployeeEducationID as id',
+                    'degree.Value as degree',
+                    'discipline.Value as discipline',
+                    'major.Value as major',
+                    'edu.GPA as gpa',
+                    'edu.StartDate as start_date',
+                    'edu.EndDate as end_date',
+                    'edu.EffectiveDate as effective_date',
+                ])
+                ->first();
+
+            if (!$education) {
+                return null;
+            }
+
+            return [
+                'id'             => $education->id,
+                'degree'          => $education->degree,
+                'discipline'      => $education->discipline,
+                'major'           => $education->major,
+                'gpa'             => $education->gpa,
+                'start_date'      => $education->start_date,
+                'end_date'        => $education->end_date,
+                'effective_date'  => $education->effective_date,
+            ];
+        } catch (\Throwable $e) {
+            Log::error("getEmployeeEducationInfo({$employeeId}) failed: {$e->getMessage()}");
+            return null;
+        }
     }
 
     /**

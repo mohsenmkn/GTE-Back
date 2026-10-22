@@ -118,33 +118,6 @@ class AssessmentController extends Controller
     /**
      * ثبت نمرات + محاسبه گپ
      */
-//    public function submit(Request $request, Assessment $assessment): JsonResponse
-//    {
-//        $user = $request->user();
-//
-//        // 🔐 فقط ارزیابِ خودِ رکورد یا مدیر کل
-//        if (!$user->can('assessment.manage') && $assessment->evaluator_user_id !== $user->id) {
-//            return response()->json(['message' => 'فقط ارزیابِ تعیین‌شده می‌تواند این ارزیابی را ثبت کند.'], 403);
-//        }
-//
-//        // 🔒 فقط در حالت پیش‌نویس یا برگشت‌خورده قابل ویرایش
-//        if (!in_array($assessment->status, [Assessment::STATUS_DRAFT, Assessment::STATUS_REJECTED])) {
-//            return response()->json(['message' => 'این ارزیابی قابل ویرایش نیست.'], 422);
-//        }
-//
-//        $request->validate([
-//            'scores'   => 'required|array',
-//            'scores.*' => 'integer|between:1,5',
-//        ]);
-//
-//        $assessment = $this->service->submitAnswers($assessment, $request->scores);
-//
-//        return response()->json([
-//            'message'    => 'ارزیابی ثبت شد و وضعیت به «تکمیل شده» تغییر کرد.',
-//            'assessment' => $assessment,
-//        ]);
-//    }
-
 
     /**
      * POST /assessment/assessments/{id}/submit
@@ -475,6 +448,10 @@ class AssessmentController extends Controller
      * POST /assessment/posts
      * تعریف پست سازمانی جدید
      */
+    /**
+     * POST /assessment/posts
+     * تعریف پست سازمانی جدید
+     */
     public function storePost(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -485,12 +462,44 @@ class AssessmentController extends Controller
             'min_education'        => 'nullable|string|max:50',
             'min_experience_years' => 'nullable|integer|min:0|max:50',
             'description'          => 'nullable|string',
+            // ✅ فیلدهای جدید برای Template
+            'template_id'          => 'nullable|exists:assessment_question_templates,id',
+            'import_template'      => 'nullable|boolean',
         ], [
             'title.required' => 'عنوان پست الزامی است.',
             'title.unique'   => 'پستی با این عنوان قبلاً ثبت شده است.',
         ]);
 
-        $post = AssessmentPost::create($validated + ['is_active' => true]);
+        // ایجاد پست
+        $post = \Modules\Assessment\App\Models\AssessmentPost::create([
+            'title'                => $validated['title'],
+            'grade'                => $validated['grade'] ?? null,
+            'unit'                 => $validated['unit'] ?? null,
+            'domain'               => $validated['domain'] ?? null,
+            'min_education'        => $validated['min_education'] ?? null,
+            'min_experience_years' => $validated['min_experience_years'] ?? null,
+            'description'          => $validated['description'] ?? null,
+            'is_active'            => true,
+        ]);
+
+        // ✅ اگر template_id ارائه شده و import_template=true
+        if (isset($validated['template_id']) && ($validated['import_template'] ?? false)) {
+            try {
+                $templateService = app(\Modules\Assessment\App\Services\AssessmentTemplateService::class);
+                $result = $templateService->importToPost($validated['template_id'], $post->id);
+
+                return response()->json([
+                    'post'    => $post->fresh(),
+                    'message' => "شناسنامه ایجاد شد و {$result['imported']} سوال از تمپلیت import شد",
+                    'import_result' => $result,
+                ], 201);
+            } catch (\Exception $e) {
+                return response()->json([
+                    'post'    => $post,
+                    'message' => "شناسنامه ایجاد شد اما import تمپلیت با خطا مواجه شد: " . $e->getMessage(),
+                ], 201);
+            }
+        }
 
         return response()->json(['post' => $post], 201);
     }
@@ -869,10 +878,80 @@ class AssessmentController extends Controller
     }
 
 
+    /**
+     * POST /assessment/posts/{post}/sync-template
+     * sync شناسنامه با آخرین نسخه تمپلیت
+     */
+    public function syncPostTemplate(Request $request, \Modules\Assessment\App\Models\AssessmentPost $post): JsonResponse
+    {
+        if (!$request->user()->can('assessment.manage')) {
+            return response()->json(['message' => 'دسترسی مجاز نیست.'], 403);
+        }
+
+        if (!$post->template_id) {
+            return response()->json([
+                'message' => 'این شناسنامه از تمپلیت ساخته نشده است',
+            ], 422);
+        }
+
+        try {
+            $templateService = app(\Modules\Assessment\App\Services\AssessmentTemplateService::class);
+            $result = $templateService->syncPostWithTemplate($post->id);
+
+            return response()->json([
+                'message' => $result['message'] ?? "sync انجام شد: {$result['added']} سوال جدید، {$result['updated']} سوال به‌روزرسانی شد",
+                'result'  => $result,
+                'post'    => $post->fresh(),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'خطا در sync: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 
 
 
+    /**
+     * GET /assessment/hr/organizational-units
+     * دریافت لیست واحدهای سازمانی
+     */
+    public function organizationalUnits(): JsonResponse
+    {
+        $units = \Modules\HR\App\Models\OrganizationalUnit::where('is_active', true)
+            ->orderBy('title')
+            ->get(['id', 'title', 'code'])
+            ->map(fn($u) => [
+                'id' => $u->id,
+                'title' => $u->title,
+                'code' => $u->code,
+            ]);
 
+        return response()->json(['units' => $units]);
+    }
+
+    /**
+     * GET /assessment/hr/job-positions
+     * دریافت لیست سمت‌های شغلی (از EmployeePosition)
+     */
+    public function jobPositions(): JsonResponse
+    {
+        $positions = \Modules\HR\App\Models\EmployeePosition::with('unit')
+            ->whereNotNull('post_title')
+            ->whereHas('user', fn($q) => $q->where('is_active', true))
+            ->select('post_title', 'organizational_unit_id')
+            ->distinct()
+            ->get()
+            ->map(fn($p) => [
+                'post_title' => $p->post_title,
+                'unit' => $p->unit ? [
+                    'id' => $p->unit->id,
+                    'title' => $p->unit->title,
+                ] : null,
+            ]);
+
+        return response()->json(['positions' => $positions]);
+    }
 
 
 

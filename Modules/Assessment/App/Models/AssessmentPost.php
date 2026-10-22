@@ -19,11 +19,13 @@ class AssessmentPost extends Model
         'description',
         'is_active',
         'source',
+        'template_id',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
         'min_experience_years' => 'integer',
+        'template_id'           => 'integer',
     ];
 
     /* ──────────────────────────────── Relations ─────────────────────────────── */
@@ -36,6 +38,21 @@ class AssessmentPost extends Model
     public function assessments(): HasMany
     {
         return $this->hasMany(Assessment::class, 'post_id');
+    }
+
+    public function template(): BelongsTo
+    {
+        return $this->belongsTo(AssessmentQuestionTemplate::class, 'template_id');
+    }
+
+    public function proposals(): HasMany
+    {
+        return $this->hasMany(AssessmentQuestionProposal::class, 'target_post_id');
+    }
+
+    public function pendingProposals(): HasMany
+    {
+        return $this->proposals()->where('status', AssessmentQuestionProposal::STATUS_PENDING);
     }
 
     /* ──────────────────────────────── Scopes ──────────────────────────────── */
@@ -117,5 +134,27 @@ class AssessmentPost extends Model
             'id',                         // PK در جدول Post
             'category_id'                 // FK در جدول واسط به Category
         )->distinct()->orderBy('sort_order');
+    }
+
+
+    /**
+     * آیا این شناسنامه از تمپلیت ساخته شده؟
+     */
+    public function getHasTemplateAttribute(): bool
+    {
+        return !is_null($this->template_id);
+    }
+
+    /**
+     * آیا تمپلیت نسخه جدیدتری داره؟
+     */
+    public function getTemplateOutdatedAttribute(): bool
+    {
+        if (!$this->template_id || !$this->template_version_used) {
+            return false;
+        }
+
+        $latestVersion = $this->template?->version ?? 0;
+        return $latestVersion > $this->template_version_used;
     }
 }

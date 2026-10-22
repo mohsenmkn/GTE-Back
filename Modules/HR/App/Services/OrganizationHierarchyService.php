@@ -317,4 +317,160 @@ class OrganizationHierarchyService
             $checked += $visited;
         }
     }
+
+    /**
+     * دریافت تمام زیرمجموعه‌های مستقیم و غیرمستقیم یک کارمند
+     *
+     * @param EmployeePosition $employee کارمند مورد نظر
+     * @param array $snapshot ساختار سازمانی (از متد snapshot())
+     * @return Collection لیست کارمندان زیرمجموعه
+     */
+    public function subordinates(EmployeePosition $employee, array $snapshot): Collection
+    {
+        $positions = $snapshot['positions'];
+        $units = $snapshot['units'];
+        $employees = $snapshot['employees'];
+
+        $subordinates = collect();
+
+        // اگر کارمند organizational_position_id دارد
+        if ($employee->organizational_position_id) {
+            $position = $positions->get($employee->organizational_position_id);
+
+            if (!$position) {
+                return collect();
+            }
+
+            // ۱. یافتن تمام position های زیرمجموعه (بازگشتی)
+            $childPositionIds = $this->getChildPositionIds($position->id, $positions);
+
+            // ۲. دریافت کارمندان آن position ها
+            foreach ($childPositionIds as $positionId) {
+                $subordinates = $subordinates->merge(
+                    $employees->where('organizational_position_id', $positionId)
+                        ->where('user_id', '!=', $employee->user_id)
+                );
+            }
+
+            // ۳. یافتن واحدهای زیرمجموعه آن position
+            $childUnitIds = $this->getChildUnitIdsForPosition($position->id, $units, $positions);
+
+            // ۴. دریافت کارمندان آن واحدها (که position ندارند یا position هاشون زیرمجموعه نیست)
+            foreach ($childUnitIds as $unitId) {
+                $subordinates = $subordinates->merge(
+                    $employees->where('organizational_unit_id', $unitId)
+                        ->where('user_id', '!=', $employee->user_id)
+                        ->filter(function ($emp) use ($childPositionIds) {
+                            // فقط کارمندانی که position ندارند یا position شون در لیست child نیست
+                            return !$emp->organizational_position_id
+                                || !in_array($emp->organizational_position_id, $childPositionIds);
+                        })
+                );
+            }
+
+        } else {
+            // Legacy: کارمند بدون organizational_position_id
+            // فقط واحدهای زیرمجموعه را بررسی کن
+            $childUnitIds = $this->getChildUnitIds($employee->organizational_unit_id, $units);
+
+            foreach ($childUnitIds as $unitId) {
+                $subordinates = $subordinates->merge(
+                    $employees->where('organizational_unit_id', $unitId)
+                        ->where('user_id', '!=', $employee->user_id)
+                );
+            }
+        }
+
+        return $subordinates->unique('user_id')->values();
+    }
+
+    /**
+     * دریافت تمام ID های position های زیرمجموعه (بازگشتی)
+     */
+    private function getChildPositionIds(int $positionId, Collection $positions): array
+    {
+        $childIds = [];
+        $queue = [$positionId];
+        $visited = [];
+
+        while (!empty($queue)) {
+            $currentId = array_shift($queue);
+
+            if (isset($visited[$currentId])) {
+                continue; // جلوگیری از حلقه
+            }
+            $visited[$currentId] = true;
+
+            // یافتن position های فرزند
+            $children = $positions->where('parent_id', $currentId);
+
+            foreach ($children as $child) {
+                $childIds[] = $child->id;
+                $queue[] = $child->id;
+            }
+        }
+
+        return $childIds;
+    }
+
+    /**
+     * دریافت تمام ID های واحد های زیرمجموعه (بازگشتی)
+     */
+    private function getChildUnitIds(int $unitId, Collection $units): array
+    {
+        $childIds = [];
+        $queue = [$unitId];
+        $visited = [];
+
+        while (!empty($queue)) {
+            $currentId = array_shift($queue);
+
+            if (isset($visited[$currentId])) {
+                continue;
+            }
+            $visited[$currentId] = true;
+
+            // یافتن واحد های فرزند
+            $children = $units->where('parent_id', $currentId);
+
+            foreach ($children as $child) {
+                $childIds[] = $child->id;
+                $queue[] = $child->id;
+            }
+        }
+
+        return $childIds;
+    }
+
+    /**
+     * دریافت تمام ID های واحد های زیرمجموعه یک position
+     * (واحدهایی که parent_position_id شون این position هست یا زیرمجموعه اون هستن)
+     */
+    private function getChildUnitIdsForPosition(int $positionId, Collection $units, Collection $positions): array
+    {
+        $childUnitIds = [];
+
+        // ۱. واحدهایی که مستقیماً زیر این position هستن
+        $directChildUnits = $units->where('parent_position_id', $positionId);
+
+        foreach ($directChildUnits as $unit) {
+            $childUnitIds[] = $unit->id;
+            // زیرمجموعه های این واحد را هم اضافه کن
+            $childUnitIds = array_merge($childUnitIds, $this->getChildUnitIds($unit->id, $units));
+        }
+
+        // ۲. واحدهایی که زیر position های فرزند این position هستن
+        $childPositionIds = $this->getChildPositionIds($positionId, $positions);
+
+        foreach ($childPositionIds as $childPosId) {
+            $unitsUnderChildPos = $units->where('parent_position_id', $childPosId);
+
+            foreach ($unitsUnderChildPos as $unit) {
+                $childUnitIds[] = $unit->id;
+                $childUnitIds = array_merge($childUnitIds, $this->getChildUnitIds($unit->id, $units));
+            }
+        }
+
+        return array_unique($childUnitIds);
+    }
 }

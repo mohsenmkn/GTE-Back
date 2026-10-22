@@ -6,6 +6,8 @@ use Modules\Assessment\App\Http\Controllers\AssessmentController;
 use Modules\Assessment\App\Http\Controllers\AssessmentCycleController;
 use Modules\Assessment\App\Http\Controllers\AssessmentMappingController;
 use Modules\Assessment\App\Http\Controllers\AssessmentPeriodController;
+use Modules\Assessment\App\Http\Controllers\AssessmentProposalController;
+use Modules\Assessment\App\Http\Controllers\AssessmentTemplateController;
 
 /*
 |--------------------------------------------------------------------------
@@ -147,6 +149,76 @@ Route::prefix('v1/assessment')
             Route::post('/assign-evaluator', [AssessmentMappingController::class, 'assignEvaluator']);
         });
 
+
+
+// ── تمپلیت‌ها (خط 117) ──
+        Route::prefix('templates')->middleware('permission:assessment.template_manage|assessment.manage')->group(function () {
+            Route::get('/', [AssessmentTemplateController::class, 'index'])
+                ->middleware('permission:assessment.template_view|assessment.template_manage|assessment.manage');
+            Route::get('/latest-approved', [AssessmentTemplateController::class, 'latestApproved'])
+                ->middleware('permission:assessment.template_view|assessment.template_manage|assessment.manage');
+            Route::post('/', [AssessmentTemplateController::class, 'store']);
+            Route::get('/{template}', [AssessmentTemplateController::class, 'show'])
+                ->middleware('permission:assessment.template_view|assessment.template_manage|assessment.manage');
+            Route::put('/{template}', [AssessmentTemplateController::class, 'update']);
+            Route::delete('/{template}', [AssessmentTemplateController::class, 'destroy']);
+
+            // اکشن‌های تمپلیت
+            Route::post('/{template}/approve', [AssessmentTemplateController::class, 'approve']);
+            Route::post('/{template}/increment-version', [AssessmentTemplateController::class, 'incrementVersion']);
+
+            // سوالات تمپلیت
+            Route::post('/{template}/questions', [AssessmentTemplateController::class, 'storeQuestion']);
+            Route::put('/{template}/questions/reorder', [AssessmentTemplateController::class, 'reorderQuestions']);
+            Route::put('/questions/{question}', [AssessmentTemplateController::class, 'updateQuestion']);
+            Route::delete('/questions/{question}', [AssessmentTemplateController::class, 'destroyQuestion']);
+
+            // Import/Sync
+            Route::post('/{template}/import-to-post', [AssessmentTemplateController::class, 'importToPost'])
+                ->middleware('permission:assessment.manage');
+            Route::post('/posts/{post}/sync-template', [AssessmentTemplateController::class, 'syncPostWithTemplate'])
+                ->middleware('permission:assessment.manage');
+        });
+
+// ── پیشنهادات سوالات تخصصی (خط 136) ──
+        Route::prefix('proposals')->group(function () {
+            // بالادست‌ها
+            Route::get('/designable', [AssessmentProposalController::class, 'designable'])
+                ->middleware('permission:assessment.proposal_create');
+            Route::post('/', [AssessmentProposalController::class, 'store'])
+                ->middleware('permission:assessment.proposal_create');
+            Route::delete('/{proposal}', [AssessmentProposalController::class, 'destroy'])
+                ->middleware('permission:assessment.proposal_create|assessment.manage');
+
+            // HR Admin
+            Route::get('/stats', [AssessmentProposalController::class, 'stats'])
+                ->middleware('permission:assessment.proposal_review|assessment.manage');
+            Route::get('/', [AssessmentProposalController::class, 'index'])
+                ->middleware('permission:assessment.proposal_create|assessment.proposal_review|assessment.manage');
+            Route::get('/post/{postId}', [AssessmentProposalController::class, 'forPost'])
+                ->middleware('permission:assessment.proposal_review|assessment.manage');
+
+            // اکشن‌های بررسی (HR Admin)
+            Route::post('/{proposal}/approve', [AssessmentProposalController::class, 'approve'])
+                ->middleware('permission:assessment.proposal_review|assessment.manage');
+            Route::post('/{proposal}/reject', [AssessmentProposalController::class, 'reject'])
+                ->middleware('permission:assessment.proposal_review|assessment.manage');
+
+            // Bulk actions (HR Admin)
+            Route::post('/bulk-approve', [AssessmentProposalController::class, 'bulkApprove'])
+                ->middleware('permission:assessment.proposal_review|assessment.manage');
+            Route::post('/bulk-reject', [AssessmentProposalController::class, 'bulkReject'])
+                ->middleware('permission:assessment.proposal_review|assessment.manage');
+        });
+
+
+        // ═══════════════════════════════════════════════
+        // ۱۳. داده‌های HR برای فرم شناسنامه
+        // ═══════════════════════════════════════════════
+        Route::prefix('hr')->middleware('permission:assessment.manage')->group(function () {
+            Route::get('/organizational-units', [AssessmentController::class, 'organizationalUnits']);
+            Route::get('/job-positions', [AssessmentController::class, 'jobPositions']);
+        });
 
 
 

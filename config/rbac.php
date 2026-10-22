@@ -51,7 +51,18 @@ return [
         'complaintmanagers' => ['read', 'create', 'update', 'delete'],  // ✅ جدید
 
         //شایستگی
-        'assessment' => ['view', 'evaluate', 'manage', 'approve'],
+        // در بخش modules → assessment
+        'assessment' => [
+            'view',              // مشاهده ارزیابی‌ها
+            'evaluate',          // ثبت ارزیابی
+            'manage',            // مدیریت کامل (HR Admin)
+            'approve',           // تایید ارزیابی
+            // ✅ Permission های جدید
+            'template_manage',   // مدیریت تمپلیت‌ها (فقط HR Admin)
+            'template_view',     // مشاهده تمپلیت‌ها
+            'proposal_create',   // ایجاد پیشنهاد سوال (بالادست‌ها)
+            'proposal_review',   // بررسی پیشنهادات (فقط HR Admin)
+        ],
 
         'system_settings' => ['manage_database', 'manage_general'],
 
@@ -168,6 +179,12 @@ return [
             'pre_warehouse' => 'پیش‌انبار',
 // اضافه کردن به بخش 'labels.module_names':
             'trip_expense' => 'هزینه‌های سفر رانندگان',
+
+            // در بخش labels.actions
+            'template_manage' => 'مدیریت تمپلیت سوالات',
+            'template_view'   => 'مشاهده تمپلیت سوالات',
+            'proposal_create' => 'ایجاد پیشنهاد سوال',
+            'proposal_review' => 'بررسی پیشنهادات سوالات',
 
 
         ],
