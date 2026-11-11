@@ -36,13 +36,6 @@ return [
     ],
 
 
-    'payroll' => [
-        'driver' => 'daily',
-        'path' => storage_path('logs/payroll.log'),
-        'level' => 'info',
-        'days' => 365,  // لاگ‌های حقوقی یک سال نگه داشته شوند
-    ],
-
     /*
     |--------------------------------------------------------------------------
     | Log Channels
@@ -59,6 +52,13 @@ return [
     */
 
     'channels' => [
+        'payroll' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/payroll.log'),
+            'level' => 'info',
+            'days' => 365,
+        ],
+
         'stack' => [
             'driver' => 'stack',
             'channels' => ['single'],

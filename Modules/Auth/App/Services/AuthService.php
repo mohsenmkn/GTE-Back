@@ -60,14 +60,14 @@ class AuthService
         $smsSent = $this->sendSmsViaMsgway($mobile, $otp);
 
         if (!$smsSent) {
-            Log::warning("Failed to send SMS to {$mobile}. OTP is: {$otp}");
-            // نکته: در محیط توسعه یا در صورت خطای سرویس پیامک، کد در لاگ ذخیره می‌شود
-            // می‌توانید در صورت نیاز اینجا Exception پرتاب کنید
+            Log::warning('Failed to send password reset OTP SMS.');
+            // Do not include the one-time code or phone number in application logs.
         }
 
         return [
             'message' => 'کد تایید ارسال شد.',
-            'expires_in' => 300 // 5 دقیقه به ثانیه
+            'expires_in' => 300, // 5 دقیقه به ثانیه
+            'sms_sent' => $smsSent,
         ];
     }
 

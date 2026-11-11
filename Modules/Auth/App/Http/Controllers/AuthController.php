@@ -19,6 +19,7 @@ use Illuminate\Validation\Rule;
 use Spatie\Permission\PermissionRegistrar;
 use Modules\HR\App\Jobs\SyncUserPositionJob;
 use Modules\Auth\App\Models\LoginActivity;
+use Modules\Payroll\App\Services\SystemAuditLogger;
 class AuthController extends Controller
 {
     protected $authService;
@@ -41,6 +42,7 @@ class AuthController extends Controller
 
         if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
             if (!$request->filled('captcha') || !$request->filled('captcha_key')) {
+                $this->auditAuth($request, 'login.blocked', 'failed');
                 return response()->json([
                     'message' => 'تعداد تلاش‌های ناموفق بیش از حد مجاز است. لطفا کد امنیتی را وارد کنید.',
                     'require_captcha' => true
@@ -49,6 +51,7 @@ class AuthController extends Controller
 
             if (!captcha_api_check((string) $request->captcha, (string) $request->captcha_key)) {
                 RateLimiter::hit($throttleKey, 300);
+                $this->auditAuth($request, 'login.captcha_failed', 'failed');
                 return response()->json(['message' => 'کد امنیتی (کپچا) اشتباه است.'], 400);
             }
         }
@@ -58,6 +61,7 @@ class AuthController extends Controller
             $user = $result['user'];
 
             if (!$user->canLogin()) {
+                $this->auditAuth($request, 'login.inactive_account', 'failed', $user->id);
                 return response()->json([
                     'message' => $user->isContractor()
                         ? 'ورود برای این حساب امکان‌پذیر نیست'
@@ -70,6 +74,7 @@ class AuthController extends Controller
 
             // ✅ ثبت LoginActivity
             LoginActivity::logLogin($user, $request);
+            $this->auditAuth($request, 'login.succeeded', 'success', $user->id);
 
             // ✅ قبل از return
             dispatch(new SyncUserPositionJob($user))->afterResponse();
@@ -80,6 +85,7 @@ class AuthController extends Controller
             ]);
         } catch (ValidationException $e) {
             RateLimiter::hit($throttleKey, 300);
+            $this->auditAuth($request, 'login.failed', 'failed');
             return response()->json(['message' => $e->errors()['mobile'][0]], 401);
         }
     }
@@ -94,6 +100,7 @@ class AuthController extends Controller
         $result = $this->authService->findOrCreateUser($request->mobile);
 
         if (!$result['found']) {
+            $this->auditAuth($request, 'password_reset.account_not_found', 'failed');
             return response()->json([
                 'message' => 'کاربری با این شماره موبایل در سیستم یافت نشد.',
                 'can_register' => false
@@ -103,6 +110,7 @@ class AuthController extends Controller
         /** @var User $user */
         $user = $result['user'];
         if (!$user->canLogin()) {
+            $this->auditAuth($request, 'password_reset.inactive_account', 'failed', $user->id);
             return response()->json([
                 'message' => $user->isContractor()
                     ? 'ورود برای این حساب امکان‌پذیر نیست'
@@ -112,10 +120,20 @@ class AuthController extends Controller
 
         try {
             $result = $this->authService->sendOtp($request->mobile);
+            $smsSent = (bool) ($result['sms_sent'] ?? true);
+            $this->auditAuth(
+                $request,
+                $smsSent ? 'password_reset.otp_sent' : 'password_reset.otp_send_failed',
+                $smsSent ? 'success' : 'failed',
+                $user->id,
+            );
+            unset($result['sms_sent']);
             return response()->json($result, 200);
         } catch (ValidationException $e) {
+            $this->auditAuth($request, 'password_reset.otp_send_failed', 'failed', $user->id);
             return response()->json(['message' => $e->errors()['mobile'][0]], 400);
         } catch (\Exception $e) {
+            $this->auditAuth($request, 'password_reset.otp_send_error', 'failed', $user->id);
             Log::error('Send OTP Error: ' . $e->getMessage());
             return response()->json(['message' => 'خطا در ارسال کد تایید.'], 500);
         }
@@ -132,12 +150,15 @@ class AuthController extends Controller
             $user = $this->authService->verifyOtp($request->mobile, $request->otp);
 
             if (!$user->canLogin()) {
+                $this->auditAuth($request, 'password_reset.otp_verified_inactive_account', 'failed', $user->id);
                 return response()->json([
                     'message' => $user->isContractor()
                         ? 'ورود برای حساب‌های پیمانکار امکان‌پذیر نیست'
                         : 'حساب کاربری شما غیرفعال است',
                 ], 403);
             }
+
+            $this->auditAuth($request, 'password_reset.otp_verified', 'success', $user->id);
 
             return response()->json([
                 'message' => 'کد با موفقیت تایید شد.',
@@ -147,6 +168,7 @@ class AuthController extends Controller
                 ]
             ], 200);
         } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->auditAuth($request, 'password_reset.otp_verification_failed', 'failed');
             return response()->json(['message' => $e->errors()['otp'][0] ?? 'کد تایید نامعتبر است.'], 400);
         }
     }
@@ -174,14 +196,29 @@ class AuthController extends Controller
 
             // 2. تغییر رمز عبور
             $this->authService->resetPassword($user, $request->password);
+            $this->auditAuth($request, 'password_reset.completed', 'success', $user->id);
 
             return response()->json(['message' => 'رمز عبور با موفقیت تغییر کرد.'], 200);
         } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->auditAuth($request, 'password_reset.failed', 'failed');
             return response()->json(['message' => $e->errors()['otp'][0] ?? 'کد تایید نامعتبر یا منقضی شده است.'], 400);
         } catch (\Exception $e) {
+            $this->auditAuth($request, 'password_reset.error', 'failed');
             Log::error('Reset Password Error: ' . $e->getMessage());
             return response()->json(['message' => 'خطا در تغییر رمز عبور. لطفاً مجدداً تلاش کنید.'], 500);
         }
+    }
+
+    private function auditAuth(Request $request, string $action, string $status, ?int $userId = null): void
+    {
+        app(SystemAuditLogger::class)->record(
+            $request,
+            'Auth',
+            $action,
+            $status,
+            $userId,
+            SystemAuditLogger::maskMobile($request->input('mobile')),
+        );
     }
 
     public function logout(Request $request)

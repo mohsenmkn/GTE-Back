@@ -31,6 +31,7 @@ return [
         'consumption'=>['view'],
         'AdminPayroll'=>['view'],
         'Payroll'=>['view'],
+        'Log'=>['view'],
         'AdminHr'=>['view'],
         'library'=>['view'],
         'librarybooks'=>['view','manage'],

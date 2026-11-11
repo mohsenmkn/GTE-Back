@@ -10,8 +10,8 @@ use Modules\Payroll\App\Services\PayrollService;
 use Modules\Payroll\App\Http\Resources\PayslipResource;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Log;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Modules\Payroll\App\Services\PayrollAuditLogger;
 
 class PayslipController extends Controller
 {
@@ -77,12 +77,7 @@ class PayslipController extends Controller
         }
 
         // لاگ دسترسی
-        Log::channel('payroll')->info('Payslip viewed', [
-            'user_id' => $user->id,
-            'personnel_code' => $user->personnel_code,
-            'year_month' => $yearMonth,
-            'ip' => $request->ip(),
-        ]);
+        app(PayrollAuditLogger::class)->record($request, 'payslip.viewed', null, $yearMonth);
 
         return response()->json([
             'data' => new PayslipResource($payslip),
@@ -106,6 +101,8 @@ class PayslipController extends Controller
         if (!$payslip) {
             abort(404, 'فیش حقوقی یافت نشد.');
         }
+
+        app(PayrollAuditLogger::class)->record($request, 'payslip.pdf_downloaded', null, $yearMonth);
 
         $pdf = Pdf::loadView('Payroll::pdf.payslip', [
             'payslip' => $payslip,
@@ -146,12 +143,7 @@ class PayslipController extends Controller
         }
 
         // لاگ دسترسی مدیر
-        Log::channel('payroll')->info('Payslip viewed by manager', [
-            'viewer_id' => $user->id,
-            'target_employee_id' => $employeeId,
-            'year_month' => $yearMonth,
-            'ip' => $request->ip(),
-        ]);
+        app(PayrollAuditLogger::class)->record($request, 'payslip.viewed_by_manager', $employeeId, $yearMonth);
 
         return response()->json([
             'data' => new PayslipResource($payslip),
@@ -210,6 +202,8 @@ class PayslipController extends Controller
         if (!$payslip) {
             abort(404, 'فیش حقوقی یافت نشد.');
         }
+
+        app(PayrollAuditLogger::class)->record($request, 'payslip.pdf_downloaded_by_manager', $employeeId, $yearMonth);
 
         $pdf = Pdf::loadView('Payroll::pdf.payslip', [
             'payslip' => $payslip,

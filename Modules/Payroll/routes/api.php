@@ -4,11 +4,15 @@
 
 use Illuminate\Support\Facades\Route;
 use Modules\Payroll\App\Http\Controllers\PayslipController;
+use Modules\Payroll\App\Http\Controllers\PayrollAuditLogController;
 
 Route::middleware(['auth:sanctum', 'user.can_login'])->prefix('v1')->name('api.')->group(function () {
 
 
     Route::prefix('/payroll')->group(function () {
+        // Backward-compatible alias for clients that still request the old URL.
+        Route::get('/logs', [PayrollAuditLogController::class, 'index'])->middleware('permission:Log.view');
+
         // لیست ماه‌های موجود
         Route::get('/months', [PayslipController::class, 'months'])->middleware('permission:Payroll.view');
 
@@ -26,4 +30,6 @@ Route::middleware(['auth:sanctum', 'user.can_login'])->prefix('v1')->name('api.'
             Route::get('/employees/{employeeId}/payslip/{yearMonth}/pdf', [PayslipController::class, 'downloadEmployeePdf'])
                  ->where('yearMonth', '[0-9]{6}')->middleware('permission:AdminPayroll.view');
     });
+
+    Route::get('/system/logs', [PayrollAuditLogController::class, 'index'])->middleware('permission:Log.view');
 });
