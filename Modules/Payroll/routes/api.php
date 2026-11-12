@@ -5,6 +5,7 @@
 use Illuminate\Support\Facades\Route;
 use Modules\Payroll\App\Http\Controllers\PayslipController;
 use Modules\Payroll\App\Http\Controllers\PayrollAuditLogController;
+use Modules\Payroll\App\Http\Controllers\SecurityAlertController;
 
 Route::middleware(['auth:sanctum', 'user.can_login'])->prefix('v1')->name('api.')->group(function () {
 
@@ -32,4 +33,6 @@ Route::middleware(['auth:sanctum', 'user.can_login'])->prefix('v1')->name('api.'
     });
 
     Route::get('/system/logs', [PayrollAuditLogController::class, 'index'])->middleware('permission:Log.view');
+    Route::get('/system/security-alerts', [SecurityAlertController::class, 'index'])->middleware('permission:Log.view');
+    Route::patch('/system/security-alerts/{alert}/resolve', [SecurityAlertController::class, 'resolve'])->middleware('permission:Log.view');
 });

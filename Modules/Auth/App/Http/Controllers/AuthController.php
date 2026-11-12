@@ -5,6 +5,7 @@ namespace Modules\Auth\App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
@@ -13,6 +14,7 @@ use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\PersonalAccessToken;
 use Modules\Auth\App\Models\User;
 use Modules\Auth\App\Services\AuthService;
+use Modules\Auth\App\Services\AuthFailureLimiter;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
 use Illuminate\Validation\Rule;
@@ -38,7 +40,16 @@ class AuthController extends Controller
             'captcha_key' => 'sometimes|nullable|string',
         ]);
 
-        $throttleKey = 'login_attempts:' . $request->mobile . '_' . $request->ip();
+        if ($response = $this->lockedAuthResponse($request)) {
+            $this->auditAuth($request, 'auth.composite_lock_blocked', 'failed');
+            return $response;
+        }
+
+        $throttleKey = 'login_attempts:'.hash('sha256', implode("\0", [
+            $request->mobile,
+            $request->ip(),
+            (string) $request->userAgent(),
+        ]));
 
         if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
             if (!$request->filled('captcha') || !$request->filled('captcha_key')) {
@@ -52,6 +63,10 @@ class AuthController extends Controller
             if (!captcha_api_check((string) $request->captcha, (string) $request->captcha_key)) {
                 RateLimiter::hit($throttleKey, 300);
                 $this->auditAuth($request, 'login.captcha_failed', 'failed');
+                if (app(AuthFailureLimiter::class)->recordFailure($request, $request->mobile)) {
+                    $this->auditAuth($request, 'auth.composite_lock_triggered', 'failed');
+                    return $this->lockedAuthResponse($request);
+                }
                 return response()->json(['message' => 'کد امنیتی (کپچا) اشتباه است.'], 400);
             }
         }
@@ -71,6 +86,7 @@ class AuthController extends Controller
 
             // ✅ فقط وقتی ورود موفقیت‌آمیز بود، شمارنده پاک شود
             RateLimiter::clear($throttleKey);
+            app(AuthFailureLimiter::class)->clear($request, $request->mobile);
 
             // ✅ ثبت LoginActivity
             LoginActivity::logLogin($user, $request);
@@ -86,6 +102,10 @@ class AuthController extends Controller
         } catch (ValidationException $e) {
             RateLimiter::hit($throttleKey, 300);
             $this->auditAuth($request, 'login.failed', 'failed');
+            if (app(AuthFailureLimiter::class)->recordFailure($request, $request->mobile)) {
+                $this->auditAuth($request, 'auth.composite_lock_triggered', 'failed');
+                return $this->lockedAuthResponse($request);
+            }
             return response()->json(['message' => $e->errors()['mobile'][0]], 401);
         }
     }
@@ -95,6 +115,11 @@ class AuthController extends Controller
         $request->validate([
             'mobile' => 'required|regex:/^09\d{9}$/'
         ]);
+
+        if ($response = $this->lockedAuthResponse($request)) {
+            $this->auditAuth($request, 'auth.composite_lock_blocked', 'failed');
+            return $response;
+        }
 
         // جستجو یا ایجاد کاربر
         $result = $this->authService->findOrCreateUser($request->mobile);
@@ -146,6 +171,11 @@ class AuthController extends Controller
             'otp' => 'required|string|size:5',
         ]);
 
+        if ($response = $this->lockedAuthResponse($request)) {
+            $this->auditAuth($request, 'auth.composite_lock_blocked', 'failed');
+            return $response;
+        }
+
         try {
             $user = $this->authService->verifyOtp($request->mobile, $request->otp);
 
@@ -159,6 +189,7 @@ class AuthController extends Controller
             }
 
             $this->auditAuth($request, 'password_reset.otp_verified', 'success', $user->id);
+            app(AuthFailureLimiter::class)->clear($request, $request->mobile);
 
             return response()->json([
                 'message' => 'کد با موفقیت تایید شد.',
@@ -169,6 +200,10 @@ class AuthController extends Controller
             ], 200);
         } catch (\Illuminate\Validation\ValidationException $e) {
             $this->auditAuth($request, 'password_reset.otp_verification_failed', 'failed');
+            if (app(AuthFailureLimiter::class)->recordFailure($request, $request->mobile)) {
+                $this->auditAuth($request, 'auth.composite_lock_triggered', 'failed');
+                return $this->lockedAuthResponse($request);
+            }
             return response()->json(['message' => $e->errors()['otp'][0] ?? 'کد تایید نامعتبر است.'], 400);
         }
     }
@@ -181,6 +216,11 @@ class AuthController extends Controller
             'otp' => 'required|string|size:5', // <-- این خط حیاتی است
             'password' => 'required|string|min:6|confirmed',
         ]);
+
+        if ($response = $this->lockedAuthResponse($request)) {
+            $this->auditAuth($request, 'auth.composite_lock_blocked', 'failed');
+            return $response;
+        }
 
         try {
             // 1. ابتدا OTP را مجدداً بررسی می‌کنیم (امنیت)
@@ -197,10 +237,15 @@ class AuthController extends Controller
             // 2. تغییر رمز عبور
             $this->authService->resetPassword($user, $request->password);
             $this->auditAuth($request, 'password_reset.completed', 'success', $user->id);
+            app(AuthFailureLimiter::class)->clear($request, $request->mobile);
 
             return response()->json(['message' => 'رمز عبور با موفقیت تغییر کرد.'], 200);
         } catch (\Illuminate\Validation\ValidationException $e) {
             $this->auditAuth($request, 'password_reset.failed', 'failed');
+            if ($request->filled('otp') && app(AuthFailureLimiter::class)->recordFailure($request, $request->mobile)) {
+                $this->auditAuth($request, 'auth.composite_lock_triggered', 'failed');
+                return $this->lockedAuthResponse($request);
+            }
             return response()->json(['message' => $e->errors()['otp'][0] ?? 'کد تایید نامعتبر یا منقضی شده است.'], 400);
         } catch (\Exception $e) {
             $this->auditAuth($request, 'password_reset.error', 'failed');
@@ -219,6 +264,24 @@ class AuthController extends Controller
             $userId,
             SystemAuditLogger::maskMobile($request->input('mobile')),
         );
+    }
+
+    private function lockedAuthResponse(Request $request): ?JsonResponse
+    {
+        $limiter = app(AuthFailureLimiter::class);
+        $mobile = $request->input('mobile');
+
+        if (!$limiter->isLocked($request, $mobile)) {
+            return null;
+        }
+
+        $retryAfter = $limiter->secondsUntilUnlock($request, $mobile);
+
+        return response()->json([
+            'message' => 'به‌دلیل ۱۰ تلاش ناموفق، این حساب و مرورگر برای ۵ دقیقه موقتاً مسدود شده است.',
+            'locked' => true,
+            'retry_after' => $retryAfter,
+        ], 429)->header('Retry-After', (string) $retryAfter);
     }
 
     public function logout(Request $request)

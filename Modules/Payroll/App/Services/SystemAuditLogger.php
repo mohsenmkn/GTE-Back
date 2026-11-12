@@ -44,6 +44,17 @@ class SystemAuditLogger
             ]);
         }
 
+        try {
+            app(SecurityIncidentDetector::class)->inspect($request, $module, $action, $status, $subject);
+        } catch (\Throwable $exception) {
+            Log::channel('payroll')->error('Security alert detection failed', [
+                'module' => $module,
+                'action' => $action,
+                'ip' => $request->ip(),
+                'exception' => $exception->getMessage(),
+            ]);
+        }
+
         Log::channel('payroll')->info($module.'.'.$action, [
             'status' => $status,
             'user_id' => $userId,

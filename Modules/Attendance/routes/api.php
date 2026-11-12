@@ -9,6 +9,7 @@ Route::middleware(['auth:sanctum', 'user.can_login'])->prefix('v1')->name('api.'
     // خلاصه تردد کاربر فعلی
     Route::get('attendance/summary', [AttendanceController::class, 'summary']);
     Route::get('attendance/latest', [AttendanceController::class, 'latest']);
+    Route::get('attendance/me/daily', [AttendanceController::class, 'myDailyAttendance']);
 
     // مدیران HR
     Route::middleware(['permission:AdminHr.view'])->group(function () {

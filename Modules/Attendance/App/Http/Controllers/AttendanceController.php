@@ -39,6 +39,28 @@ class AttendanceController extends Controller
     }
 
     /**
+     * GET /api/v1/attendance/me/daily
+     * جزئیات تردد ماه جاری کاربر واردشده
+     */
+    public function myDailyAttendance(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if (empty($user->personnel_code)) {
+            return response()->json([
+                'message' => 'کد پرسنلی تعریف نشده است.',
+                'data' => ['summary' => null, 'daily' => []],
+            ], 404);
+        }
+
+        // کد پرسنلی فقط از کاربر احراز هویت‌شده گرفته می‌شود تا امکان
+        // مشاهده تردد کاربر دیگر از طریق پارامتر درخواست وجود نداشته باشد.
+        $result = $this->attendanceService->getDailyAttendance($user->personnel_code);
+
+        return response()->json(['data' => $result]);
+    }
+
+    /**
      * 🔑 GET /api/attendance/employees
      * لیست پرسنل با خلاصه تردد (برای مدیران HR)
      */
