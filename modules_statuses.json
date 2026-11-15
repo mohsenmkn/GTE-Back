@@ -27,5 +27,6 @@
     "WarehouseGtrabar": true,
     "Finance": true,
     "PreWarehouse": true,
-    "TripExpense": true
+    "TripExpense": true,
+    "ApiManagement": true
 }
