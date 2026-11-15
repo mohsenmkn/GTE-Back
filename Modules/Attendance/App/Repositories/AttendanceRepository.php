@@ -44,6 +44,12 @@ class AttendanceRepository
         return DB::connection($this->connection)->select($sql, $params);
     }
 
+    /** Return only today's attendance flag for each personnel code. */
+    public function getAttendanceStatusForDate(string $date): array
+    {
+        return DB::connection($this->connection)->select("\n+            SELECT\n+                P.CodeMask AS personnel_code,\n+                CASE WHEN ISNULL(D.PresenceMinutes, 0) > 0\n+                    THEN 'present' ELSE 'absent' END AS status\n+            FROM [framework].[Prs].[Person] AS P\n+            LEFT JOIN (\n+                SELECT personelid, SUM(TRY_CONVERT(FLOAT, Value)) AS PresenceMinutes\n+                FROM [framework].[Att].[DailyResult]\n+                WHERE [date] = ? AND Code = '11251'\n+                GROUP BY personelid\n+            ) AS D ON D.personelid = P.ID\n+            WHERE P.CodeMask IS NOT NULL AND P.CodeMask <> ''\n+            ORDER BY P.CodeMask ASC\n+        ", [$date]);
+    }
+
 
 
     /**

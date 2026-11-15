@@ -48,6 +48,17 @@ class AttendanceService
         return $summaries;
     }
 
+    /** Return today's date and a minimal present/absent result per personnel code. */
+    public function getTodayAttendanceStatus(): array
+    {
+        $today = \Morilog\Jalali\Jalalian::now()->format('Y/m/d');
+
+        return [
+            'date' => $today,
+            'data' => $this->repository->getAttendanceStatusForDate($today),
+        ];
+    }
+
     /**
      * محاسبه خلاصه یک ماه
      */

@@ -1,0 +1,9 @@
+{
+    "name": "ApiManagement",
+    "alias": "api-management",
+    "description": "مدیریت دسترسی API برای سامانه‌های بیرونی",
+    "keywords": ["api", "integration", "hr"],
+    "priority": 0,
+    "providers": ["Modules\\ApiManagement\\App\\Providers\\ApiManagementServiceProvider"],
+    "files": []
+}
