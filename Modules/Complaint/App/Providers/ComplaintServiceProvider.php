@@ -28,7 +28,7 @@ class ComplaintServiceProvider extends ServiceProvider
         $this->loadMigrationsFrom(module_path($this->moduleName, 'Database/migrations'));
 
         $this->mergeConfigFrom(
-            __DIR__ . '/../../Config/config.php',
+            __DIR__ . '/../../config/config.php',
             'complaint'
         );
 
